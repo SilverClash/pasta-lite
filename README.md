@@ -11,8 +11,8 @@ window, with your branches on the left and your working changes on the right. It
 workflow: stage, commit, branch, sync, stash, merge, rebase and undo. It's built on Electron and runs
 your system `git`, so your existing SSH keys, credential helper and git config just work.
 
-> **Status: alpha (0.1.0).** This is an early preview. There are no packaged builds yet, so you run it
-> from source. Expect rough edges, and please report what you find.
+> **Status: alpha (0.1.0).** This is an early preview. Expect rough edges, and please report what you
+> find.
 
 ## Screenshots
 
@@ -73,11 +73,27 @@ your system `git`, so your existing SSH keys, credential helper and git config j
 
 ## Requirements
 
-- **git 2.51 or newer.** Pasta Lite checks this at startup and won't run with an older git (undo depends on `git reflog write`).
-- **Node.js 22.12 or newer**, to install and run it from source (Electron's installer needs it).
-- **Platforms:** developed and tested on macOS. Windows and Linux are supported in the code but not yet tested.
+- **git 2.51 or newer**, installed on your system. Pasta Lite checks this at startup and won't run with an older git (undo depends on `git reflog write`). The git that ships with macOS is usually older, so install one with [Homebrew](https://brew.sh) (`brew install git`). The app finds Homebrew's git even when it's started from the Finder or the Dock.
+- **macOS 13 or newer** for the downloadable app.
+- **Node.js 22.12 or newer**, only to run it from source (Electron's installer needs it).
+- **Platforms:** developed and tested on macOS. Windows and Linux are supported in the code but not yet tested, and there are no builds for them.
+
+## Download
+
+Download the DMG for your Mac from the [Releases page](https://github.com/SilverClash/pasta-lite/releases):
+
+| Your Mac | File |
+| --- | --- |
+| Apple silicon (M1 and later) | `Pasta-Lite-<version>-arm64.dmg` |
+| Intel | `Pasta-Lite-<version>-x64.dmg` |
+
+Not sure which one you have? Choose Apple menu → About This Mac: an Apple silicon Mac lists a "Chip" such as Apple M2, an Intel Mac lists a "Processor". Open the DMG and drag Pasta Lite to Applications.
+
+The app is signed with a Developer ID and notarized by Apple, so it opens like any other app. If macOS still refuses to open it, go to System Settings → Privacy & Security and click Open Anyway.
 
 ## Getting started
+
+To run it from source instead:
 
 ```sh
 git clone https://github.com/SilverClash/pasta-lite.git
@@ -115,7 +131,7 @@ It also creates `/tmp/pasta-demo.origin.git` next to it. The screenshots above w
 - No renaming branches, deleting remote branches or managing remotes.
 - No commit search, file history or blame.
 - Dark theme only.
-- No packaged builds yet.
+- Downloadable builds for macOS only.
 
 ## Development
 

@@ -8,8 +8,13 @@ minor versions may contain breaking changes.
 
 ## [Unreleased]
 
-The first public release, planned as **0.1.0 (alpha)**. It runs from source (`npm start`) and
-needs Node.js 22.12 or newer and git 2.51 or newer. There are no packaged builds yet.
+## [0.1.0] - 2026-09-27
+
+The first public release, an **alpha**. Pasta Lite is a minimal, graph-first desktop git client
+built on Electron that runs your system git. It covers the everyday workflow: staging, commits,
+branches, fetch, pull and push, stash, merge, rebase (including interactive rebase), conflicts,
+worktrees and undo. It needs git 2.51 or newer. macOS is the tested platform: download the DMG,
+or run it from source with Node.js 22.12 or newer.
 
 ### Added
 
@@ -53,6 +58,9 @@ needs Node.js 22.12 or newer and git 2.51 or newer. There are no packaged builds
   Copy Diagnostics.
 - Checks at startup for git 2.51 or newer, including when the app is launched from Finder.
 - A dark theme, and the Pasta Lite logo and app icon.
+- **macOS DMG builds** for Apple silicon (arm64) and Intel (x64), signed with a Developer ID and
+  notarized by Apple. `npm run dist:mac:unsigned` builds unsigned DMGs locally
+  (CONTRIBUTING.md, "Building the macOS app").
 
 ### Known limitations
 
@@ -63,8 +71,10 @@ needs Node.js 22.12 or newer and git 2.51 or newer. There are no packaged builds
 - No tags UI: tags are shown in the graph and the sidebar, but you can't create, delete or push
   them.
 - Dark theme only.
-- Tested on macOS only. Windows and Linux are untested.
+- Tested on macOS only. Windows and Linux are untested, and there are no builds for them.
+- No automatic updates: download new versions from the Releases page.
 - Authentication has only been tested against a local server. Real HTTPS and SSH remotes and
   credential helpers have not been checked end to end yet.
 
-[Unreleased]: https://github.com/SilverClash/pasta-lite/commits/main
+[Unreleased]: https://github.com/SilverClash/pasta-lite/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/SilverClash/pasta-lite/releases/tag/v0.1.0

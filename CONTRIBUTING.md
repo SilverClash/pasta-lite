@@ -1,8 +1,8 @@
 # Contributing to Pasta Lite
 
-Thanks for your interest in Pasta Lite. It is a small, alpha-stage Electron git client that runs
-from source. It has no framework and no bundler. Bug reports, fixes and focused features are
-welcome.
+Thanks for your interest in Pasta Lite. It is a small, alpha-stage Electron git client. It has no
+framework and no bundler: you develop it from source, and releases are packaged as macOS DMGs.
+Bug reports, fixes and focused features are welcome.
 
 Please follow the [Code of Conduct](CODE_OF_CONDUCT.md). To report a security problem, do not
 open an issue: follow [SECURITY.md](SECURITY.md) instead.
@@ -75,6 +75,99 @@ ESLint is not a dependency. The script runs a pinned version through `npx`, so t
 downloads it. `eslint.config.js` enables the recommended rules only, with no formatting rules and
 no Prettier. The editor settings are in `.editorconfig`: 2 spaces, LF, UTF-8 and a final newline.
 Please don't add new lint findings. Fixes for existing ones are welcome as separate PRs.
+
+## Building the macOS app
+
+The app is packaged with [electron-builder](https://www.electron.build), configured in the
+`"build"` field of `package.json`. It makes two DMGs, one for Apple silicon (`arm64`) and one for
+Intel (`x64`). Separate DMGs keep each download at about half the size of a universal one. Only
+the runtime files go into the app (`main.js`, `main/`, `src/`, `renderer/`, the preloads and the
+icon), plus our `LICENSE` and `NOTICE` and Electron's `LICENSE.electron.txt` and
+`LICENSES.chromium.html` in `Contents/Resources`. The output goes to `dist/`, which is git-ignored.
+
+### Local build (unsigned)
+
+Anyone can build the DMGs on a Mac, with no Apple account:
+
+```sh
+npm ci
+npm run dist:mac:unsigned
+# dist/Pasta-Lite-<version>-arm64.dmg, dist/Pasta-Lite-<version>-x64.dmg
+# dist/mac-arm64/Pasta Lite.app, dist/mac/Pasta Lite.app
+```
+
+This build skips Developer ID signing and notarization. `scripts/mac-adhoc-sign.js` gives the app
+an ad-hoc signature instead, so it runs on the Mac that built it. On another Mac, Gatekeeper blocks
+it until you click Open Anyway in System Settings → Privacy & Security, or run
+`xattr -dr com.apple.quarantine "/Applications/Pasta Lite.app"`.
+
+Packaged builds ignore `--smoke`. To smoke-test the packaged code, run it with the development
+Electron, which allows the harness:
+
+```sh
+npx electron "dist/mac-arm64/Pasta Lite.app/Contents/Resources/app.asar" --smoke /path/to/repo out.png
+```
+
+### Release build (maintainers)
+
+Release DMGs are signed with a Developer ID and notarized by Apple, so they open with no
+Gatekeeper warning. You need a paid Apple Developer account, Xcode or the Xcode command line tools,
+and these one-time steps:
+
+1. **Create a Developer ID Application certificate.** In Xcode, open Settings → Accounts, select
+   the team, click Manage Certificates, then + → Developer ID Application. Or create it on
+   developer.apple.com under Certificates, IDs & Profiles and install it. Check that it's in the
+   login keychain:
+
+   ```sh
+   security find-identity -v -p codesigning   # lists "Developer ID Application: <name> (<team ID>)"
+   ```
+
+2. **Store the notary credentials in the keychain.** Create an app-specific password at
+   [account.apple.com](https://account.apple.com) (Sign-In and Security → App-Specific Passwords).
+   Then run this, which prompts for the password and saves it under the profile name
+   `pasta-lite-notary`:
+
+   ```sh
+   xcrun notarytool store-credentials pasta-lite-notary --apple-id <your Apple ID> --team-id <team ID>
+   ```
+
+   The password stays in your keychain. It never goes into the repository or an environment
+   variable.
+
+Then build, sign and notarize:
+
+```sh
+APPLE_KEYCHAIN_PROFILE=pasta-lite-notary npm run dist:mac
+```
+
+electron-builder picks the "Developer ID Application" certificate from the keychain
+(`mac.identity`; it never falls back to an Apple Development certificate). It signs with the
+hardened runtime and `build/entitlements.mac.plist`, submits the app to the notary service and
+staples the ticket. It also signs each DMG, and `scripts/mac-notarize-dmg.js` then notarizes and
+staples the DMGs.
+Each notarization usually takes a few minutes. The build fails if no Developer ID certificate is
+found or `APPLE_KEYCHAIN_PROFILE` is not set, so it never produces a half-signed release.
+
+Verify the result before you upload it:
+
+```sh
+npm run verify:mac
+```
+
+The script runs `codesign --verify --deep --strict` and `spctl -a -vvv -t exec` on each `.app`
+(expect `source=Notarized Developer ID`), `spctl -a -vvv -t open --context
+context:primary-signature` on each DMG, and `xcrun stapler validate` on both. It also prints
+`spctl -a -vvv -t install` for the DMGs as information. If notarization fails, read Apple's log
+with `xcrun notarytool log <submission id> --keychain-profile pasta-lite-notary`.
+
+Upload the two DMGs from `dist/` to the GitHub release.
+
+**Entitlements.** `build/entitlements.mac.plist` grants only `com.apple.security.cs.allow-jit`,
+which V8 needs for its JIT under the hardened runtime. The app has no native modules, loads no
+unsigned libraries, sends no Apple Events (Open in Terminal runs `/usr/bin/open -a Terminal`) and
+isn't sandboxed. Starting git or other programs needs no entitlement, because they run under their
+own signatures.
 
 ## Architecture
 
