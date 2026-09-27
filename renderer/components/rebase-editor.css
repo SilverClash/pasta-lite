@@ -1,0 +1,96 @@
+/* rebase-editor component — the interactive rebase view replacing the graph (docs/plans/rebase.md §5.6). */
+.rebase-editor {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg);
+  --re-row-h: 34px;
+}
+.re-header {
+  flex: none; min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 6px 14px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.re-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-strong); }
+.re-subtitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 12.5px; unicode-bidi: isolate; }
+
+.re-notes { flex: none; display: flex; flex-direction: column; }
+.re-stale {
+  display: flex; align-items: center; gap: 12px; padding: 7px 14px;
+  background: color-mix(in srgb, var(--red) 16%, var(--panel)); border-bottom: 1px solid var(--border); color: var(--text-strong);
+}
+.re-stale-text { flex: 1; min-width: 0; }
+.re-reload { padding: 4px 12px; }
+.re-warnings { list-style: none; margin: 0; padding: 0; }
+.re-note { padding: 6px 14px; font-size: 12.5px; border-bottom: 1px solid var(--border); unicode-bidi: isolate; }
+.re-note-warn { color: var(--orange-text); background: color-mix(in srgb, var(--orange) 10%, transparent); }
+.re-note-info { color: var(--text-2); }
+
+/* the grid: rows positioned in a spacer (virtualized above 200 rows) */
+.re-grid { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; position: relative; outline: none; }
+.re-grid:focus-visible { box-shadow: var(--focus-inset); }
+.re-spacer { position: relative; width: 100%; min-height: 100%; }
+.re-row {
+  position: absolute; left: 0; right: 0; top: 0; height: var(--re-row-h);
+  display: flex; align-items: center; gap: 0; border-bottom: 1px solid var(--white-4); cursor: default;
+}
+.re-row:hover { background: var(--blue-hover); }
+.re-row.is-selected { background: var(--blue-select); }
+.re-row.is-cursor { box-shadow: inset 2px 0 0 var(--white-35); }
+.re-grid:focus-visible .re-row.is-cursor, .re-grid:focus .re-row.is-cursor { box-shadow: var(--focus-inset), inset 2px 0 0 var(--focus-color); }
+.re-row.is-dragged { opacity: 0.45; }
+.re-cell { flex: none; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.re-c-action { width: 104px; padding: 0 6px 0 10px; }
+.re-c-handle { width: 22px; text-align: center; color: var(--text-3); cursor: grab; user-select: none; touch-action: none; }
+.rebase-editor.is-dragging, .rebase-editor.is-dragging .re-c-handle { cursor: grabbing; }
+.re-c-avatar { width: 30px; }
+.re-c-msg { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 4px; }
+.re-c-sha { width: 74px; color: var(--text-3); font: 11.5px var(--mono); }
+.re-c-author { width: 140px; padding-right: 10px; color: var(--text-2); unicode-bidi: isolate; }
+.re-c-date { width: 72px; padding-right: 12px; color: var(--text-3); font-size: 12px; }
+
+.re-action {
+  width: 100%; font: inherit; font-size: 12px; color: var(--text-strong);
+  background: var(--panel-2); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 3px 6px;
+}
+.re-action:focus { outline: none; border-color: var(--focus-color); box-shadow: var(--focus-field); }
+.re-avatar {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--panel-3); color: var(--text-strong); font-size: 9.5px; font-weight: 600;
+}
+.re-subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); unicode-bidi: isolate; }
+.re-row.is-selected .re-subject { color: var(--text-strong); }
+.re-into { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; color: var(--accent-text); font-size: 12px; unicode-bidi: isolate; }
+.re-edit {
+  flex: none; border: 0; background: transparent; color: var(--text-3); cursor: pointer; padding: 0 4px; font-size: 13px; border-radius: 4px;
+}
+.re-edit:hover { color: var(--text-strong); background: var(--white-8); }
+.re-edit.is-edited { color: var(--blue-text); }
+.re-row-error { flex: none; color: var(--red-text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+
+.re-row.is-squash .re-c-msg, .re-row.is-fixup .re-c-msg { padding-left: 22px; }
+.re-row.is-fixup .re-subject { color: var(--text-2); }
+.re-row.is-drop .re-subject, .re-row.is-drop .re-c-author, .re-row.is-drop .re-c-sha { text-decoration: line-through; color: var(--text-3); }
+.re-row.is-drop .re-avatar { opacity: 0.4; }
+.re-row.is-reword .re-action, .re-row.is-edit .re-action { border-color: color-mix(in srgb, var(--blue) 55%, transparent); }
+.re-row.is-squash .re-action, .re-row.is-fixup .re-action { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.re-row.is-drop .re-action { border-color: color-mix(in srgb, var(--red) 55%, transparent); color: var(--red-text); }
+.re-row.is-error { background: color-mix(in srgb, var(--red) 10%, transparent); }
+.re-row.is-published .re-c-sha { color: var(--orange-text); }
+
+.re-drop-line { position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--blue); z-index: 2; pointer-events: none; }
+
+.re-onto {
+  flex: none; padding: 8px 14px; border-top: 1px solid var(--border-strong); background: var(--panel);
+  color: var(--text-2); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; unicode-bidi: isolate;
+}
+.re-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.re-footer {
+  flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+  background: var(--panel); border-top: 1px solid var(--border);
+}
+.re-summary { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; font-size: 12.5px; }
+.re-summary-text { color: var(--text); }
+.re-count { color: var(--text-3); }
+.re-error { color: var(--red-text); }
+.re-buttons { flex: none; display: flex; gap: 8px; }
+.re-buttons .btn { padding: 6px 14px; }
+.re-buttons .btn-primary { padding: 6px 18px; }
+.rebase-editor.is-running .re-grid { opacity: 0.7; }

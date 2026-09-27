@@ -1,0 +1,95 @@
+/* Repository picker (components/repo-picker.js): the list shared by the toolbar popover and the
+   start screen, the popover itself, and the start screen (New Tab / no repo). */
+
+/* ---- list: search field, "Recently opened", listbox, footer */
+.rp { display: flex; flex-direction: column; min-width: 0; -webkit-app-region: no-drag; }
+.rp .icon { flex: none; display: block; }
+.rp-search { position: relative; display: flex; align-items: center; }
+.rp-search-icon { position: absolute; left: 9px; color: var(--text-3); pointer-events: none; }
+.rp-input {
+  width: 100%; height: 30px; padding: 0 10px 0 30px;
+  font: inherit; color: var(--text-strong); user-select: text;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); outline: none;
+}
+.rp-input::placeholder { color: var(--text-3); }
+.rp-input:focus { border-color: var(--focus-color); box-shadow: var(--focus-field); }
+.rp-label {
+  margin: 12px 2px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.rp-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+.rp-item {
+  display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 6px 0 8px;
+  border-radius: 4px; cursor: pointer; color: var(--text);
+}
+.rp-item.is-active { background: var(--blue-select); color: var(--text-strong); }
+.rp-item-icon { color: var(--icon-muted); }
+.rp-item.is-current .rp-item-icon { color: var(--accent); }
+.rp-item-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.rp-name {
+  flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 500; color: var(--text-strong); unicode-bidi: isolate;
+}
+.rp-item.is-current .rp-name { font-weight: 700; }
+.rp-path {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; color: var(--text-3); direction: rtl; text-align: left;
+}
+.rp-path-text { direction: ltr; unicode-bidi: isolate; }
+.rp-item.is-active .rp-path { color: var(--text-2); }
+.rp-hit { background: none; color: var(--accent-text); font-weight: 700; }
+.rp-path .rp-hit { color: var(--accent-text); font-weight: 600; }
+.rp-badge {
+  flex: none; font: 600 10px/16px var(--font); padding: 0 6px; border-radius: 8px; white-space: nowrap;
+  background: var(--white-8); color: var(--text-2);
+}
+.rp-badge-current { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent-text); }
+.rp-badge-tab { background: color-mix(in srgb, var(--blue) 18%, transparent); color: var(--blue-text); }
+/* open in a new tab: shown on the row under the pointer and the active row */
+.rp-newtab {
+  flex: none; width: 22px; height: 22px; padding: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--text-2); background: none; border: 0; border-radius: 4px; cursor: pointer; visibility: hidden;
+}
+.rp-item:hover .rp-newtab, .rp-item.is-active .rp-newtab { visibility: visible; }
+.rp-newtab:hover { background: var(--white-12); color: var(--text-strong); }
+.rp-empty { margin: 6px 2px; font-size: 12px; color: var(--text-3); }
+.rp-footer {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 8px -10px -8px; padding: 6px 6px; border-top: 1px solid var(--border);
+}
+.rp-foot-btn {
+  display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px;
+  font: inherit; font-size: 12px; color: var(--text); background: none; border: 0; border-radius: 4px; cursor: pointer;
+}
+.rp-foot-btn:hover { background: var(--white-6); color: var(--text-strong); }
+.rp-foot-btn:focus-visible { outline-offset: -2px; }
+.rp-all { color: var(--blue-text); }
+.rp-key { margin-left: 2px; font-size: 11px; color: var(--text-3); }
+
+/* ---- popover under the toolbar's repository stack */
+.rp-pop {
+  position: fixed; z-index: 1100; width: 380px; max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px); display: flex; flex-direction: column;
+  padding: 10px 10px 8px; background: var(--panel-2); border: 1px solid var(--border-strong);
+  border-radius: 8px; box-shadow: var(--shadow-menu); -webkit-app-region: no-drag;
+}
+.rp-pop .rp { min-height: 0; flex: 1; }
+.rp-pop .rp-list { max-height: 360px; }
+.rp-pop .rp-input { background: var(--panel); }
+
+/* ---- start screen (New Tab / no repo) */
+.start { text-align: left; align-items: stretch; width: 480px; }
+.start-title {
+  display: flex; align-items: center; gap: 12px; margin: 0 0 6px;
+  font-size: 24px; font-weight: 600; color: var(--text-strong);
+}
+.start-title .brand-mark { width: 24px; height: 24px; }
+.start-sub { margin: 0 0 18px; }
+.start .rp {
+  padding: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+}
+.start .rp-list { max-height: 330px; }
+.start-actions { display: flex; justify-content: center; margin-top: 18px; }
+.start-open { display: flex; align-items: center; gap: 10px; }
+.start-key { font-weight: 500; opacity: 0.75; }
+.start-hint { text-align: center; margin: 12px 0 0; }

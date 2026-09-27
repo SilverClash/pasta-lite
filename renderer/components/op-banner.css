@@ -1,0 +1,32 @@
+/* Operation banner (docs/plans/rebase.md §5.3): a rebase / merge / … in progress, a pending autostash, or a bare repository. */
+.op-banner {
+  flex: none; display: flex; align-items: center; gap: 16px;
+  padding: 8px 14px; border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--orange) 16%, var(--toolbar));
+  color: var(--text);
+}
+.op-banner[hidden] { display: none; }
+.op-banner[data-kind="autostash"] { background: color-mix(in srgb, var(--blue) 14%, var(--toolbar)); }
+.op-banner[data-kind="other"] { background: color-mix(in srgb, var(--yellow) 12%, var(--toolbar)); }
+/* A bare repository: informational, one button per worktree (they wrap). */
+.op-banner[data-kind="bare"] { background: color-mix(in srgb, var(--accent) 10%, var(--toolbar)); }
+.op-banner[data-kind="bare"] .ob-actions { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; }
+.ob-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ob-text { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.ob-title { color: var(--text-strong); font-weight: 600; unicode-bidi: isolate; }
+.ob-lines { color: var(--text-2); font-size: 12px; min-width: 0; unicode-bidi: isolate; }
+.ob-detail-wrap[hidden] { display: none; }
+.ob-detail-label { font-size: 11px; color: var(--text-3); }
+.ob-detail {
+  margin: 2px 0 0; max-height: calc(3 * 1.5em + 8px); overflow: auto; padding: 4px 8px;
+  background: var(--bg); border-radius: var(--radius); font: 12px/1.5 var(--mono); color: var(--text-2);
+  white-space: pre-wrap; word-break: break-all; unicode-bidi: isolate;
+}
+.ob-actions { flex: none; display: flex; gap: 8px; }
+.ob-btn { padding: 5px 12px; white-space: nowrap; }
+.ob-btn.ob-primary { background: var(--blue); color: var(--text-strong); border-color: transparent; font-weight: 600; }
+.ob-btn.ob-primary:hover { background: var(--primary-hover); }
+.ob-btn.ob-danger { color: var(--red-text); }
+.ob-btn[aria-disabled="true"] { opacity: 0.45; cursor: default; }
+.ob-btn.ob-primary[aria-disabled="true"]:hover { background: var(--blue); }
+.ob-btn:not(.ob-primary)[aria-disabled="true"]:hover { background: var(--panel-2); }

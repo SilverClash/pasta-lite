@@ -1,0 +1,291 @@
+'use strict';
+// The context-menu descriptors of the toolbar, sidebar and graph (plain script; exposes
+// window.PLMenus, and module.exports under node for the tests; loads after policy.js and menu.js,
+// before actions.js, which re-exports all of it as Components.actions). Pure, no DOM.
+//
+// Descriptors: {label, flow, args, danger?, disabled?, title?, checked?} | {separator: true} (see
+// actions.js). Labels and titles are display-safe (util.displayName).
+//
+//   refMenuItems(ref, state, flows?) -> finished descriptors for a branch / tag (sidebar rows and graph
+//                                   ref pills): checkout, push, create branch, set upstream, delete, fetch,
+//                                   and "Merge <x> into <cur>" / "Rebase <cur> onto <x>" (the current
+//                                   branch moves, never x) / "Rebase <cur> onto <upstream>", each rebase
+//                                   with its "Interactive Rebase <cur> onto <x>" (docs/plans/rebase.md
+//                                   §5.1); a no-op onto a local branch behind its upstream says so
+//   commitOpItems(hash, state) -> "Rebase / Interactive Rebase <cur> onto this commit" / "Merge this commit
+//                                   into <cur>" outside HEAD's loaded history, "Interactive Rebase <n> children
+//                                   of <sha7>" inside it (unfinished descriptors)
+//   commitItems(hash, state, flows?) -> finished descriptors of a graph commit row: check out the commit,
+//                                   create a branch there, commitOpItems, check out each local branch at it
+//   stashMenuItems(entry, state, flows?) -> finished Apply / Pop / Drop of a stash (git.stashes() item)
+//   checkoutItem({target, kind, label?, title?, current?}) -> the one checkout descriptor (current:
+//                                   disabled, "Already checked out"); createHere(ref) -> "Create branch here…"
+//   upstreamTarget(state, name), behindOf(state, name), deleteItem(ref, state), fullRef(kind, name)
+// "Finished": gated (PLPolicy.gateItems) and disabled while busy or without their flow
+// (Components.actions.finishItems, looked up when a menu is built: actions.js loads after this script).
+(function () {
+  const C = window.Components;
+  const { displayName, plural, short, OID_RE } = C.util;
+  // Node tests that load this script alone get the models from their files.
+  const need = (name, file) => window[name] || (typeof module !== 'undefined' && typeof require === 'function' ? require(file) : null);
+  const Op = need('PLOp', './op-model.js');
+  const P = need('PLPolicy', './policy.js');
+  // The interactive rebase limit (500, rebasePlan's) lives in the rebase model (components/rebase-model.js).
+  const Rebase = need('PLRebase', './components/rebase-model.js');
+  const History = need('PLHistory', './history-model.js');
+  const { headView, gateItems, isBare } = P;
+  const flowsOf = () => (typeof window !== 'undefined' ? window.PLFlows : undefined);
+
+  /** Gate, then finish (busy, missing flow: Components.actions.finishItems). */
+  const finish = (descs, state, flows) => C.actions.finishItems(gateItems(descs, state), state, flows);
+
+  /** The checkout descriptor: of a local / remote branch (name) or a commit (full sha); `current`: already there. */
+  function checkoutItem({ target, kind, label = 'Checkout', title, current = false }) {
+    const d = { label, flow: 'checkout', args: [{ target, kind }], ...(title ? { title } : {}) };
+    return current ? { ...d, disabled: true, title: 'Already checked out' } : d;
+  }
+
+
+  // What the merge / rebase flows get as their target: a full refname (never ambiguous between a
+  // local branch 'origin/x' and the remote branch, or a branch and a tag of the same name; the same
+  // rule as pull's merge) or a full sha. The backend resolves it to a commit (commitId).
+  const REF_PREFIX = { local: 'refs/heads/', remote: 'refs/remotes/', tag: 'refs/tags/' };
+  const fullRef = (kind, name) => `${REF_PREFIX[kind] || ''}${name}`;
+
+  /** '<cur>' in menu labels: the checked-out branch's display name, 'HEAD' when detached or unknown. */
+  const currentName = (state) => { const b = headView(state).branch; return b ? displayName(b) : 'HEAD'; };
+
+  /** Loaded ancestors of HEAD / of `sha` (PLHistory), or null: unknown. */
+  const headAncestors = (state) => History.headAncestors(state);
+  const ancestorsOf = (state, sha) => History.ancestorsOf(state.commits, sha);
+
+  /**
+   * "Merge <x> into <cur>" / "Rebase <cur> onto <x>" descriptors for target t = {arg, oid, label, behind?}
+   * (arg: the ref name or full sha the flow gets; label display-safe; behind: behindOf()). Disabled
+   * with the reason when HEAD has no commits, or when the loaded history already shows the op is a
+   * no-op (Components.menu shows a disabled item's reason under its label).
+   * Flows: merge(store, {target, expectHead}), rebase(store, {onto, expectHead}).
+   */
+  // A no-op the loaded history shows (already contains / already based on) is disabled with that
+  // reason, except while an operation is in progress: gateItems' "finish or abort … first" wins then.
+  // A no-op onto a local branch behind its upstream (t.behind, behindOf) points at the upstream.
+  const behindText = (t, verb) => (t.behind ? ` — ${t.behind.text}: ${verb} ${t.behind.up} instead` : '');
+  const noOp = (d, state, title) => (Op && Op.inProgress(state.status) ? d : { ...d, disabled: true, title });
+
+  function mergeItem(t, state, { label } = {}) {
+    const { oid } = headView(state);
+    const cur = currentName(state);
+    const d = { label: label || `Merge ${t.label} into ${cur}`, flow: 'merge', args: [{ target: t.arg, expectHead: oid }] };
+    if (!oid) return { ...d, disabled: true, title: `Merge — ${cur} has no commits yet` };
+    const anc = headAncestors(state);
+    if (t.oid && (t.oid === oid || (anc && anc.has(t.oid)))) return noOp(d, state, `${cur} already contains ${t.label}${behindText(t, 'merge')}`);
+    return { ...d, title: `Merge ${t.label} into ${cur} (fast-forward when possible)` };
+  }
+
+  function rebaseItem(t, state, { label } = {}) {
+    const { oid } = headView(state);
+    const cur = currentName(state);
+    const d = { label: label || `Rebase ${cur} onto ${t.label}`, flow: 'rebase', args: [{ onto: t.arg, expectHead: oid }] };
+    if (!oid) return { ...d, disabled: true, title: `Rebase — ${cur} has no commits yet` };
+    const anc = headAncestors(state);
+    if (t.oid && (t.oid === oid || (anc && anc.has(t.oid)))) return noOp(d, state, `${cur} is already based on ${t.label}${behindText(t, 'rebase onto')}`);
+    return { ...d, title: `Replay ${cur}'s own commits on top of ${t.label}` };
+  }
+
+  /**
+   * "Interactive Rebase <cur> onto <x>" for target t = {arg, oid, label}: edits the commits x..HEAD and
+   * replays them onto x (x may already be in HEAD's history: then only those commits are edited).
+   * Disabled when HEAD has no commits, is x, or is in x's loaded history (nothing of its own to edit).
+   * Flow: interactiveRebase(store, {upstream, expectHead}).
+   */
+  function interactiveItem(t, state, { label } = {}) {
+    const { oid } = headView(state);
+    const cur = currentName(state);
+    const d = { label: label || `Interactive Rebase ${cur} onto ${t.label}`, flow: 'interactiveRebase', args: [{ upstream: t.arg, expectHead: oid }] };
+    if (!oid) return { ...d, disabled: true, title: `Interactive rebase — ${cur} has no commits yet` };
+    const theirs = t.oid ? ancestorsOf(state, t.oid) : null;
+    if (t.oid && (t.oid === oid || (theirs && theirs.has(oid)))) return noOp(d, state, `${cur} has no commits of its own to rebase onto ${t.label}`);
+    return { ...d, title: `Pick, reword, squash, reorder or drop ${cur}'s own commits, replayed on top of ${t.label}` };
+  }
+
+  /**
+   * "Interactive Rebase <n> children of <sha7>" for a commit in HEAD's loaded history (not HEAD): edits
+   * the n commits after it. null for HEAD itself or outside the history; disabled with the reason when
+   * the range has merge commits or more than IR_LIMIT commits. The flow re-reads the range (rebasePlan).
+   */
+  const IR_LIMIT = Rebase.MAX_ROWS;
+  function childrenItem(hash, state) {
+    const { oid } = headView(state);
+    const mine = headAncestors(state);
+    const theirs = ancestorsOf(state, hash);
+    if (!oid || hash === oid || !mine || !mine.has(hash) || !theirs) return null;
+    const range = (state.commits || []).filter((c) => mine.has(c.hash) && !theirs.has(c.hash));
+    const n = range.length;
+    const d = {
+      label: `Interactive Rebase ${plural(n, 'child', 'children')} of ${short(hash)}`,
+      flow: 'interactiveRebase', args: [{ upstream: hash, expectHead: oid }],
+      title: `Pick, reword, squash, reorder or drop the ${plural(n, 'commit')} after ${short(hash)}`,
+    };
+    const merges = range.filter((c) => (c.parents || []).length > 1).length;
+    if (merges) return { ...d, disabled: true, title: `The ${plural(n, 'commit')} after ${short(hash)} include ${plural(merges, 'merge commit')}: interactive rebase can't keep merges yet` };
+    if (n > IR_LIMIT) return { ...d, disabled: true, title: `Interactive rebase is limited to ${IR_LIMIT} commits (there are ${n} after ${short(hash)})` };
+    return d;
+  }
+
+  /** The configured upstream of local branch `name` as a menu target {arg, oid, label, gone}, or null. */
+  function upstreamTarget(state, name) {
+    const refs = state && state.refs;
+    const b = refs && (refs.local || []).find((x) => x.name === name);
+    if (!b || !b.upstream) return null;
+    const remote = (refs.remote || []).find((x) => x.name === b.upstream);
+    const r = remote || (refs.local || []).find((x) => x.name === b.upstream);
+    return { arg: fullRef(remote ? 'remote' : 'local', b.upstream), oid: r ? r.oid : null, label: displayName(b.upstream), gone: !!b.gone || !r };
+  }
+
+  /**
+   * The "why" of a no-op Merge / Rebase onto local branch `name` when its upstream is ahead of it (the
+   * user usually means the upstream then): {text: "main is 2 behind origin/main", up: 'origin/main'}
+   * (display-safe), or null (no upstream, gone, not behind).
+   */
+  function behindOf(state, name) {
+    const b = ((state.refs && state.refs.local) || []).find((x) => x.name === name);
+    if (!b || !b.upstream || b.gone || !(b.behind > 0)) return null; // NOSONAR(S1940): also true when behind is missing (<= 0 would not be)
+    const up = displayName(b.upstream);
+    return { text: `${displayName(name)} is ${b.behind} behind ${up}`, up };
+  }
+
+  /**
+   * Context menu descriptors for a branch or tag: ref = {kind: 'local'|'remote'|'tag', name, oid,
+   * current, remote?} (the sidebar's rowTarget, or a graph ref pill). Shared by the sidebar rows and
+   * the graph's ref pills (docs/plans/rebase.md §5.1). Finished: gated (gateItems) and disabled while
+   * busy or without their flow (finishItems).
+   */
+  function refMenuItems(ref, state, flows = flowsOf()) {
+    if (!ref || !state) return [];
+    const build = REF_MENUS[ref.kind];
+    return build ? finish(build(ref, state, flows), state, flows) : [];
+  }
+
+  /** The unfinished descriptors of refMenuItems, per ref kind. */
+  const REF_MENUS = {
+    local(ref, state, flows) {
+      const t = { arg: fullRef('local', ref.name), oid: ref.oid, label: displayName(ref.name), behind: ref.current ? null : behindOf(state, ref.name) };
+      const up = ref.current ? upstreamTarget(state, ref.name) : null;
+      const gone = (d) => (up && up.gone && !d.disabled ? { ...d, disabled: true, title: `The upstream ${up.label} is gone` } : d);
+      let ops = [];
+      if (!ref.current) ops = [mergeItem(t, state), rebaseItem(t, state), interactiveItem(t, state), { separator: true }];
+      else if (up) ops = [gone(rebaseItem(up, state)), gone(interactiveItem(up, state)), { separator: true }];
+      return [
+        checkoutItem({ target: ref.name, kind: 'local', current: ref.current }),
+        { label: 'Push', flow: 'push', args: [ref.current ? {} : { branch: ref.name }] },
+        createHere(ref),
+        ...(flows && typeof flows.setUpstream === 'function' ? [{ label: 'Set upstream…', flow: 'setUpstream', args: [ref.name] }] : []),
+        { separator: true },
+        ...ops,
+        deleteItem(ref, state),
+      ];
+    },
+    remote(ref, state) {
+      const t = { arg: fullRef('remote', ref.name), oid: ref.oid, label: displayName(ref.name) };
+      return [
+        checkoutItem({ target: ref.name, kind: 'remote' }),
+        createHere(ref),
+        ...(ref.remote ? [{ label: `Fetch ${displayName(ref.remote)}`, flow: 'fetch', args: [{ remote: ref.remote }] }] : []),
+        { separator: true },
+        mergeItem(t, state),
+        rebaseItem(t, state),
+        interactiveItem(t, state),
+      ];
+    },
+    tag(ref, state) {
+      const t = { arg: fullRef('tag', ref.name), oid: ref.oid, label: displayName(ref.name) };
+      return [
+        checkoutItem({ target: ref.oid, kind: 'commit', title: 'Check out the tagged commit (detached HEAD)' }),
+        createHere(ref),
+        { separator: true },
+        rebaseItem(t, state),
+        interactiveItem(t, state),
+        mergeItem(t, state),
+      ];
+    },
+  };
+
+  const createHere = (ref) => ({ label: 'Create branch here…', flow: 'createBranch', args: [{ start: ref.oid }] });
+
+  /**
+   * "Delete" of local branch ref: disabled for the checked-out branch (in a bare repository: the
+   * branch HEAD points at) and for a branch checked out in a linked worktree (state.worktrees, read
+   * for bare repositories; git refuses to delete it).
+   */
+  function deleteItem(ref, state) {
+    const d = { label: 'Delete', flow: 'deleteBranch', args: [ref.name], danger: true };
+    if (ref.current) {
+      return { ...d, disabled: true, title: isBare(state) ? 'HEAD of the bare repository points at this branch: it can’t be deleted' : 'The checked-out branch can’t be deleted: check out another branch first' };
+    }
+    const wt = (Array.isArray(state.worktrees) ? state.worktrees : []).find((w) => w && !w.bare && w.branch === ref.name);
+    return wt ? { ...d, disabled: true, title: `${displayName(ref.name)} is checked out in the worktree ${displayName(wt.path)}: it can’t be deleted` } : d;
+  }
+
+  /**
+   * The merge / rebase descriptors of a graph commit row (unfinished: the caller gates and finishes
+   * them with its other items): outside HEAD's loaded history "Rebase <cur> onto this commit" /
+   * "Interactive Rebase <cur> onto this commit" / "Merge this commit into <cur>"; inside it (HEAD
+   * excluded) "Interactive Rebase <n> children of <sha7>"; nothing for HEAD or without a HEAD commit.
+   */
+  function commitOpItems(hash, state) {
+    const { oid } = headView(state || {});
+    if (!state || !oid || !OID_RE.test(String(hash || ''))) return [];
+    const anc = headAncestors(state);
+    if (hash === oid) return [];
+    if (anc && anc.has(hash)) {
+      const d = childrenItem(hash, state);
+      return d ? [d] : [];
+    }
+    const t = { arg: hash, oid: hash, label: short(hash) };
+    const cur = currentName(state);
+    return [
+      rebaseItem(t, state, { label: `Rebase ${cur} onto this commit` }),
+      interactiveItem(t, state, { label: `Interactive Rebase ${cur} onto this commit` }),
+      mergeItem(t, state, { label: `Merge this commit into ${cur}` }),
+    ];
+  }
+
+
+  /**
+   * The descriptors of graph commit row `hash`: check out the commit (detached), create a branch there,
+   * "Rebase <cur> onto this commit" / "Merge this commit into <cur>" for a commit outside HEAD's history
+   * (commitOpItems), and check out each local branch pointing at it. Finished. state: store state
+   * ({refsBySha, refs, commits, busy, repo, status, remotes}).
+   */
+  function commitItems(hash, state, flows) {
+    const head = state && state.refs && state.refs.head;
+    const atHead = !!(head && head.detached && head.oid === hash);
+    const items = [
+      checkoutItem({ target: hash, kind: 'commit', label: 'Checkout this commit', title: 'Detached HEAD at this commit', current: atHead }),
+      createHere({ oid: hash }),
+    ];
+    const ops = commitOpItems(hash, state);
+    if (ops.length) items.push({ separator: true }, ...ops);
+    const locals = ((state && state.refsBySha && state.refsBySha.get(hash)) || []).filter((r) => r.type === 'local');
+    if (locals.length) items.push({ separator: true });
+    for (const r of locals) items.push(checkoutItem({ target: r.name, kind: 'local', label: `Checkout ${displayName(r.name)}`, current: r.current }));
+    return finish(items, state, flows);
+  }
+
+  /** Apply / Pop / Drop of a stash entry (git.stashes() item; the flows get its commit hash). Finished. */
+  function stashMenuItems(entry, state, flows) {
+    if (!entry) return [];
+    return finish([
+      { label: 'Apply', flow: 'stashApply', args: [entry.hash] },
+      { label: 'Pop', flow: 'stashPop', args: [entry.hash] },
+      { separator: true },
+      { label: 'Drop', flow: 'stashDrop', args: [entry.hash], danger: true },
+    ], state, flows);
+  }
+
+  const api = {
+    refMenuItems, commitOpItems, commitItems, stashMenuItems, checkoutItem, createHere, upstreamTarget, behindOf, deleteItem, fullRef,
+  };
+  if (typeof window !== 'undefined') window.PLMenus = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})();

@@ -1,0 +1,351 @@
+/* Pasta Lite dark theme. */
+/* Every colour the UI uses is a token here; component CSS refers to these instead of literals.
+   The palette (warm charcoal): background, panels, pasta-amber accent, "blue" = the caramel
+   interactive colour (buttons, focus, selection 20% / hover 10%), red, green, diff lines at 20%,
+   text cream-white at 80% / 60% / 42%. Tints of a token are written
+   color-mix(in srgb, var(--token) N%, transparent), i.e. the token at N% opacity. */
+:root {
+  /* core */
+  --bg: #1b1815;
+  --panel: #27231f;
+  --panel-2: #352f2a;
+  --accent: #f5b43c;
+  --blue: #ad5f0c;
+  --blue-select: color-mix(in srgb, var(--blue) 20%, transparent);
+  --blue-hover: color-mix(in srgb, var(--blue) 10%, transparent);
+  --red: #cd5344;
+  --green: #57963f;
+  --text: rgba(255, 246, 234, 0.8);
+  --text-2: rgba(255, 246, 234, 0.6);
+  --text-3: rgba(255, 246, 234, 0.42);
+  --diff-add: color-mix(in srgb, var(--green) 20%, transparent);
+  --diff-del: color-mix(in srgb, var(--red) 20%, transparent);
+
+  /* surfaces between and around the core panels */
+  --toolbar: #2a2521;
+  --panel-3: #423a34;
+  --panel-hover: #2e2924;        /* a --panel row under the pointer */
+  --panel-2-hover: #3f3832;      /* a --panel-2 button under the pointer */
+  --panel-3-hover: #4b423b;      /* a --panel-3 button under the pointer */
+  --surface-raised: #312b26;     /* floating bars */
+  --bg-hover: #221e1a;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --overlay: rgba(0, 0, 0, 0.45);
+  --shadow-pinned: 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-float: 0 6px 24px rgba(0, 0, 0, 0.5);
+  --shadow-menu: 0 8px 28px rgba(0, 0, 0, 0.5);
+  --shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.5);
+  /* white tints (chips, hovers, separators) */
+  --white-3: rgba(255, 255, 255, 0.03);
+  --white-4: rgba(255, 255, 255, 0.04);
+  --white-6: rgba(255, 255, 255, 0.06);
+  --white-8: rgba(255, 255, 255, 0.08);
+  --white-12: rgba(255, 255, 255, 0.12);
+  --white-16: rgba(255, 255, 255, 0.16);
+  --white-20: rgba(255, 255, 255, 0.2);
+  --white-25: rgba(255, 255, 255, 0.25);
+  --white-35: rgba(255, 255, 255, 0.35);
+  --white-80: rgba(255, 255, 255, 0.8);
+
+  /* text */
+  --text-strong: #fffaf3;           /* emphasis: titles, selected rows, text on solid colours */
+  --text-accent: #e8c48e;
+  --icon-muted: #948a7f;
+  --blue-text: #ffbd7d;
+  --blue-bright: #f7a557;
+  --red-text: #f59a8c;
+  --red-text-soft: #f6b3a8;
+  --red-bright: #f2735f;
+  --green-text: #a8d88e;
+  --green-text-soft: #c0e4ab;
+  --green-bright: #78bd5d;          /* green text/glyphs on a green tint (--green itself is too dark for text) */
+  --orange-text: #f8b98a;
+  --accent-text: #ffd782;
+  --text-on-light: var(--bg);       /* text on the light fills: amber, the light graph lanes */
+
+  /* secondary hues */
+  --orange: #ec8a4c;
+  --yellow: #e3cd5b;
+  --teal: #5cbfae;
+
+  /* solid buttons: every fill keeps --text-strong at >= 4.5:1 in each state (amber takes dark text) */
+  --primary-hover: #97520a;      /* .btn-primary: darker on hover (a lighter caramel drops white text below 4.5:1) */
+  --blue-solid: #87511f;         /* diff Unstage */
+  --blue-solid-hover: #9a5e27;
+  --green-solid: #44763a;        /* Commit, diff Stage */
+  --green-solid-hover: #487e3d;
+  --red-solid: #b8463a;          /* Discard / danger fills, conflict badges */
+  --red-solid-hover: #c04b3e;
+  --accent-hover: #ffc65a;       /* Amend (amber fill, --text-on-light) */
+
+  /* diff */
+  --diff-add-strong: color-mix(in srgb, var(--green) 35%, transparent);
+  --diff-del-strong: color-mix(in srgb, var(--red) 35%, transparent);
+  --diff-add-ln: rgba(168, 216, 142, 0.7);
+  --diff-del-ln: rgba(245, 154, 140, 0.7);
+
+  /* feedback: toasts, spinners, focus */
+  --toast-error-bg: color-mix(in srgb, var(--red) 15%, var(--bg));
+  --toast-info-bg: color-mix(in srgb, var(--blue) 13%, var(--bg));
+  --spinner-track: color-mix(in srgb, var(--blue) 30%, transparent);
+  --spinner-head: var(--blue);
+  --focus-color: var(--blue);
+  --focus-ring: 2px solid var(--focus-color);                /* outline on controls */
+  --focus-inset: inset 0 0 0 1px var(--focus-color);         /* box-shadow on list rows */
+  --focus-field: 0 0 0 1px var(--focus-color);               /* box-shadow on text fields (+ border) */
+
+  /* graph lanes (column % 10) */
+  --lane-0: #d4761a; --lane-1: #3f8fd9; --lane-2: #2f9e7a; --lane-3: #b3509a; --lane-4: #7b68d6;
+  --lane-5: #c9503f; --lane-6: #8a9a2a; --lane-7: #74cde0; --lane-8: #eec65a; --lane-9: #eea3c6;
+  --radius: 6px;
+  --toolbar-h: 52px;
+  --sidebar-w: 260px;
+  --details-w: 380px;
+  --row-h: 28px;
+  --titlebar-h: 38px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+/* Keyboard focus: one ring for every control (no per-component copies). Rows and scroll areas set
+   outline: none and show var(--focus-inset) instead (an outline would be clipped by their scroller);
+   toolbar and diff-header buttons pull the ring inside (negative outline-offset) for the same reason. */
+:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
+
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 var(--font);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.muted { color: var(--text-2); }
+.small { font-size: 12px; }
+
+/* Title bar (drag region; room for the macOS traffic lights). */
+.titlebar {
+  height: var(--titlebar-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: drag;
+  color: var(--text-3);
+  font-size: 12px;
+}
+body[data-view="repo"] .titlebar { display: none; }
+
+/* Buttons */
+.btn {
+  -webkit-app-region: no-drag;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.btn:hover { background: var(--panel-2-hover); }
+.btn-primary { background: var(--blue); border-color: transparent; color: var(--text-strong); font-weight: 600; padding: 9px 22px; }
+.btn-primary:hover { background: var(--primary-hover); }
+
+kbd {
+  font: 600 11px var(--font);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin: 0 1px;
+  color: var(--text-2);
+}
+
+.section-label {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* Welcome */
+.welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 24px 24px;
+  min-height: 0;
+}
+.welcome-card {
+  width: 440px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.brand-mark {
+  width: 30px; height: 30px; border-radius: 50%; flex: none;
+  background: radial-gradient(circle at 35% 35%, #ffe39c, var(--accent) 60%, #c2700f);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.hint { margin: 10px 0 32px; color: var(--text-3); font-size: 12px; }
+/* The start screen's content (title, search + recent list, Open…) is components/repo-picker.css. */
+.welcome-footer { position: fixed; bottom: 12px; left: 0; right: 0; text-align: center; color: var(--text-3); }
+
+/* Repo view: layout only — each region is styled by its component's CSS. */
+.repo { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.toolbar {
+  height: var(--toolbar-h); flex: none;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 14px 0 88px; /* traffic lights */
+  background: var(--toolbar);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+}
+.toolbar button, .toolbar input, .toolbar select { -webkit-app-region: no-drag; }
+.repo-main { flex: 1; display: flex; min-height: 0; }
+.sidebar {
+  width: var(--sidebar-w); flex: none; min-width: 0; overflow: hidden;
+  background: var(--panel); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+}
+.center { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+.graph-view, .diff-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.details {
+  width: var(--details-w); flex: none; min-width: 0; overflow: hidden;
+  background: var(--panel); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column;
+}
+.placeholder { padding: 12px; }
+/* Narrow windows: shrink the side panels so the graph keeps a usable width. */
+@media (max-width: 1200px) { :root { --sidebar-w: 220px; --details-w: 320px; } }
+@media (max-width: 1000px) { :root { --sidebar-w: 200px; --details-w: 280px; } }
+
+/* Toast */
+.toast {
+  position: fixed; right: 16px; bottom: 16px; max-width: 460px;
+  background: var(--toast-error-bg); color: var(--text-strong); border: 1px solid var(--red); border-left-width: 4px;
+  border-radius: var(--radius); padding: 10px 14px; box-shadow: var(--shadow-float);
+  white-space: pre-wrap; word-break: break-word; user-select: text; cursor: default;
+}
+
+/* Thin dark scrollbars */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--white-12); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--white-20); }
+
+/* Modal dialog (renderer/dialog.js) */
+.dlg-backdrop {
+  position: fixed; inset: 0; z-index: 1000;
+  background: var(--overlay);
+  display: flex; align-items: center; justify-content: center;
+}
+.dlg {
+  width: min(460px, calc(100vw - 48px)); max-height: calc(100vh - 80px); overflow: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: var(--shadow-dialog); padding: 18px 20px 16px;
+}
+.dlg:focus-visible { outline: none; } /* focused only as a fallback when it has no control */
+.dlg-danger { border-top: 3px solid var(--red); }
+.dlg-title { margin: 0 0 8px; font-size: 15px; color: var(--text-strong); font-weight: 600; }
+.dlg-message { margin: 0 0 10px; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.dlg-detail {
+  margin: 0 0 12px; max-height: 180px; overflow: auto; padding: 8px 10px;
+  background: var(--bg); border-radius: var(--radius); font: 12px/1.5 var(--mono); color: var(--text-2);
+  white-space: pre-wrap; word-break: break-all; unicode-bidi: isolate;
+}
+.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.btn-danger { background: var(--red-solid); color: var(--text-strong); border-color: transparent; }
+.btn-danger:hover { background: var(--red-solid-hover); }
+
+/* Prompt dialog (Components.dialog.prompt) */
+.dlg-label { display: block; margin: 4px 0 6px; font-size: 12px; color: var(--text-2); }
+.dlg-input {
+  width: 100%; font: inherit; color: var(--text-strong); user-select: text;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 7px 10px; outline: none;
+}
+.dlg-input:focus { border-color: var(--focus-color); box-shadow: var(--focus-field); }
+.dlg-input[aria-invalid="true"] { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
+.dlg-error { margin: 6px 0 0; font-size: 12px; color: var(--red-text); white-space: pre-wrap; word-break: break-word; }
+.btn:disabled { opacity: 0.45; cursor: default; filter: none; }
+
+/* Message editor (Components.dialog.editMessage) */
+.dlg-wide { width: min(640px, calc(100vw - 48px)); }
+.dlg-summary-wrap { position: relative; margin-bottom: 8px; }
+.dlg-summary { padding-right: 44px; }
+.dlg-summary-count { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--text-3); }
+.dlg-summary-count.is-over { color: var(--red-text); }
+.dlg-description { display: block; resize: vertical; min-height: 120px; font: 12.5px/1.5 var(--mono); }
+.dlg-note { margin: 6px 0 0; font-size: 12px; color: var(--text-2); }
+.dlg-hash-note { color: var(--orange-text); }
+.btn-primary:disabled:hover { background: var(--blue); }
+
+/* Info toast (store.actions.notify) */
+.toast[data-level="info"] { background: var(--toast-info-bg); border-color: var(--blue); }
+.toast-hint { display: block; margin-top: 4px; color: var(--text-2); font-size: 12px; }
+
+/* Context / dropdown menu (renderer/menu.js) */
+.pl-menu {
+  position: fixed; z-index: 1100; min-width: 180px; max-width: 360px;
+  max-height: calc(100vh - 8px); overflow-y: auto;
+  padding: 4px; background: var(--panel-2); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); box-shadow: var(--shadow-menu);
+  outline: none; -webkit-app-region: no-drag;
+}
+.pl-menu-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 4px; cursor: default; outline: none;
+  color: var(--text); white-space: nowrap;
+}
+.pl-menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; unicode-bidi: isolate; }
+.pl-menu-check { width: 14px; flex: none; color: var(--accent); text-align: center; }
+.pl-menu-item.pl-menu-active { background: var(--blue-select); color: var(--text-strong); }
+.pl-menu-item:focus-visible { box-shadow: var(--focus-inset); }
+.pl-menu-danger { color: var(--red-text); }
+.pl-menu-danger.pl-menu-active { background: color-mix(in srgb, var(--red) 25%, transparent); color: var(--text-strong); }
+.pl-menu-item[aria-disabled="true"] { color: var(--text-3); }
+/* a disabled item's reason under its label: secondary text (not the dimmed disabled colour), wrapped */
+.pl-menu-item.pl-menu-has-hint { flex-wrap: wrap; row-gap: 1px; }
+.pl-menu-hint {
+  flex: 0 0 100%; min-width: 0; color: var(--text-2); font-size: 11px; line-height: 1.35;
+  white-space: normal; overflow-wrap: anywhere; unicode-bidi: isolate;
+}
+.pl-menu-hint-indent { padding-left: 20px; } /* past the 14px check column + 6px gap */
+.pl-menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+/* search mode: the field stays put above the scrolling listbox */
+.pl-menu-searchable {
+  display: flex; flex-direction: column; min-width: 260px;
+  max-height: min(420px, calc(100vh - 8px)); overflow: hidden;
+}
+.pl-menu-search {
+  flex: none; display: flex; align-items: center; gap: 6px; height: 28px; margin: 0 0 4px; padding: 0 8px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text-3); cursor: text;
+}
+.pl-menu-search:focus-within { border-color: var(--focus-color); box-shadow: var(--focus-field); color: var(--text-2); }
+.pl-menu-search-icon { flex: none; }
+.pl-menu-search-input {
+  flex: 1; min-width: 0; height: 100%; padding: 0;
+  font: inherit; font-size: 12.5px; color: var(--text); background: none; border: 0; outline: none;
+}
+.pl-menu-search-input::placeholder { color: var(--text-3); }
+.pl-menu-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.pl-menu-item[hidden], .pl-menu-sep[hidden] { display: none; }
+.pl-menu-empty { flex: none; padding: 5px 10px; color: var(--text-3); white-space: nowrap; }
+/* the status stays in the accessibility tree while nothing needs saying: empty, it takes no room */
+.pl-menu-empty:empty { padding: 0; }

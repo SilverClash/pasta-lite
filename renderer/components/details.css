@@ -1,0 +1,239 @@
+/* details component — right-hand panel. */
+.dt-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.dt .selectable { user-select: text; cursor: text; }
+
+.dt-hint {
+  margin: auto; padding: 24px; max-width: 260px; text-align: center;
+  color: var(--text-3); font-size: 12px; line-height: 1.5;
+}
+.dt-hint-inline { padding: 10px 14px; color: var(--text-3); font-size: 12px; }
+.dt-error { margin: 10px 14px; padding: 8px 10px; border-radius: var(--radius); background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red-text-soft); font-size: 12px; white-space: pre-wrap; word-break: break-word; user-select: text; }
+.dt-note { padding: 6px 14px; font-size: 11px; color: var(--text-3); border-bottom: 1px solid var(--border); }
+
+.dt-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 8px; }
+
+/* Path / Tree toggle */
+.dt-toggle { display: inline-flex; flex: none; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 1px; }
+.dt-toggle-btn {
+  font: 500 11px var(--font); color: var(--text-3); background: none; border: 0; border-radius: 4px;
+  padding: 2px 9px; cursor: pointer;
+}
+.dt-toggle-btn:hover { color: var(--text); }
+.dt-toggle-btn.is-on { background: var(--panel-3); color: var(--text-strong); }
+
+/* WIP header */
+.dt-wip-head {
+  flex: none; display: flex; align-items: center; gap: 10px; justify-content: space-between;
+  padding: 12px 14px; border-bottom: 1px solid var(--border); background: var(--panel);
+}
+.dt-wip-title { min-width: 0; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-branch-pill {
+  display: inline-block; vertical-align: 1px; max-width: 170px; overflow: hidden; text-overflow: ellipsis;
+  padding: 1px 8px; margin-left: 2px; border-radius: 10px; font-size: 12px; font-weight: 600;
+  background: color-mix(in srgb, var(--blue) 18%, transparent); color: var(--blue-text); border: 1px solid color-mix(in srgb, var(--blue) 45%, transparent);
+}
+.dt-branch-pill.is-detached { background: color-mix(in srgb, var(--orange) 15%, transparent); color: var(--orange); border-color: color-mix(in srgb, var(--orange) 45%, transparent); }
+
+/* Sections */
+.dt-section { border-bottom: 1px solid var(--border); }
+.dt-section-head {
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: 34px; padding: 4px 10px 4px 14px; background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+}
+.dt-section-title { margin: 0; font-size: 12px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; }
+.dt-count {
+  font-size: 11px; font-weight: 600; color: var(--text-2); background: var(--white-8);
+  padding: 0 6px; border-radius: 8px; line-height: 16px;
+}
+.dt-section[data-section="conflicted"] .dt-section-title { color: var(--red-text); }
+.dt-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.dt .btn-small { padding: 3px 10px; font-size: 11px; font-weight: 600; border-radius: 4px; }
+.dt-stage-all { background: color-mix(in srgb, var(--green) 18%, transparent); border-color: color-mix(in srgb, var(--green) 40%, transparent); color: var(--green-text); }
+.dt .btn:disabled, .dt .btn:disabled:hover { opacity: 0.45; cursor: default; background: var(--panel-2); }
+.btn.dt-stage-all:disabled { background: color-mix(in srgb, var(--green) 12%, transparent); }
+.dt-stage-all:not(:disabled):hover { background: color-mix(in srgb, var(--green) 32%, transparent); }
+.dt-discard-all { background: transparent; border-color: color-mix(in srgb, var(--red) 45%, transparent); color: var(--red-text); }
+.dt-discard-all:not(:disabled):hover { background: var(--red-solid); color: var(--text-strong); }
+.btn.dt-discard-all:disabled { background: transparent; }
+.dt-unstage-all { background: color-mix(in srgb, var(--red) 16%, transparent); border-color: color-mix(in srgb, var(--red) 40%, transparent); color: var(--red-text-soft); }
+.dt-unstage-all:not(:disabled):hover { background: color-mix(in srgb, var(--red) 30%, transparent); }
+.btn.dt-unstage-all:disabled { background: color-mix(in srgb, var(--red) 10%, transparent); }
+.dt-empty-list { padding: 10px 14px; font-size: 12px; color: var(--text-3); }
+
+/* File rows */
+.dt-files { padding: 3px 0; }
+.dt-files.is-virtual { position: relative; box-sizing: border-box; }
+.dt-files.is-virtual > .dt-file, .dt-files.is-virtual > .dt-folder { position: absolute; left: 0; right: 0; }
+.dt-file, .dt-folder {
+  display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px 0 14px;
+  cursor: pointer; white-space: nowrap; outline: none; position: relative;
+}
+.dt-file:hover, .dt-folder:hover { background: var(--blue-hover); }
+.dt-file:focus-visible, .dt-folder:focus-visible { box-shadow: var(--focus-inset); }
+.dt-file.is-active { background: var(--blue-select); }
+.dt-file.is-active::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--blue); }
+.dt-glyph {
+  flex: none; width: 16px; height: 16px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center;
+  font: 700 11px/1 var(--font);
+}
+.dt-glyph-mod { color: var(--orange); background: color-mix(in srgb, var(--orange) 16%, transparent); }
+.dt-glyph-add { color: var(--green-bright); background: color-mix(in srgb, var(--green) 16%, transparent); font-size: 13px; }
+.dt-glyph-untracked { color: var(--green-bright); background: color-mix(in srgb, var(--green) 16%, transparent); font-size: 13px; }
+.dt-glyph-del { color: var(--red-bright); background: color-mix(in srgb, var(--red) 18%, transparent); font-size: 13px; }
+.dt-glyph-ren { color: var(--blue-bright); background: color-mix(in srgb, var(--blue) 18%, transparent); }
+.dt-glyph-conflict { color: var(--text-strong); background: var(--red-solid); }
+.dt-file-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; unicode-bidi: isolate; direction: ltr; }
+.dt-file-dir { color: var(--text-3); }
+.dt-file-name { color: var(--text); }
+.dt-file.is-active .dt-file-name { color: var(--text-strong); }
+.dt-file[data-status="D"] .dt-file-name { text-decoration: line-through; text-decoration-color: var(--white-35); }
+.dt-file-orig { color: var(--text-3); margin-left: 6px; font-size: 11px; }
+.dt-file-actions:empty { display: none; }
+/* Hover actions: hidden until the row is hovered (.is-hover forces it, e.g. for screenshots). */
+.dt-file-actions { display: none; margin-left: auto; }
+.dt-file:hover .dt-file-actions, .dt-file.is-hover .dt-file-actions { display: flex; }
+.dt-file.is-hover { background: var(--blue-hover); }
+.dt-row-btn {
+  display: inline-flex; align-items: center; justify-content: center; height: 19px; padding: 0 8px;
+  font: 600 11px var(--font); color: var(--text); background: var(--panel-3); border: 1px solid var(--white-12);
+  border-radius: 4px; cursor: pointer; white-space: nowrap;
+}
+.dt-row-btn:hover { color: var(--text-strong); background: var(--panel-3-hover); }
+.dt-row-stage { color: var(--green-text-soft); background: color-mix(in srgb, var(--green) 22%, transparent); border-color: color-mix(in srgb, var(--green) 45%, transparent); }
+.dt-row-stage:hover { background: color-mix(in srgb, var(--green) 38%, transparent); }
+.dt-row-unstage { color: var(--red-text-soft); background: color-mix(in srgb, var(--red) 20%, transparent); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+.dt-row-unstage:hover { background: color-mix(in srgb, var(--red) 34%, transparent); }
+.dt-row-resolve { color: var(--green-text-soft); background: color-mix(in srgb, var(--green) 22%, transparent); border-color: color-mix(in srgb, var(--green) 45%, transparent); }
+.dt-row-resolve:hover { background: color-mix(in srgb, var(--green) 38%, transparent); }
+/* Keep one side of a conflict ("Keep main's version"): long branch names are cut, the title has it all. */
+.dt-row-keep { display: inline-block; max-width: 88px; overflow: hidden; text-overflow: ellipsis; line-height: 17px; }
+.dt-row-discard { width: 22px; padding: 0; color: var(--text-2); background: transparent; border-color: transparent; }
+.dt-row-discard:hover { color: var(--text-strong); background: var(--red-solid); }
+.dt-icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* While a write runs the buttons stay visible but inert (the handlers check store.state.busy too). */
+.dt.is-busy .dt-row-btn { opacity: 0.45; pointer-events: none; }
+
+/* Multi-selection (the row whose diff is open additionally gets .is-active's left bar). */
+.dt-file.is-selected { background: var(--blue-select); }
+.dt-file.is-selected:hover { background: color-mix(in srgb, var(--blue) 26%, transparent); }
+.dt-file.is-selected .dt-file-name { color: var(--text-strong); }
+
+.dt-chevron { flex: none; width: 10px; height: 10px; display: inline-flex; align-items: center; justify-content: center; transition: transform 0.1s; }
+.dt-chevron::before { content: ''; width: 5px; height: 5px; border-right: 1.5px solid var(--text-3); border-bottom: 1.5px solid var(--text-3); transform: translateY(-1px) rotate(45deg); }
+.dt-folder.is-collapsed .dt-chevron { transform: rotate(-90deg); }
+.dt-folder-icon {
+  flex: none; width: 14px; height: 10px; border-radius: 2px; background: var(--icon-muted); position: relative; margin-top: 1px;
+}
+.dt-folder-icon::before { content: ''; position: absolute; left: 0; top: -2px; width: 6px; height: 3px; border-radius: 1px 1px 0 0; background: var(--icon-muted); }
+.dt-folder-name { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; }
+
+/* Commit composer */
+.dt-composer { flex: none; border-top: 1px solid var(--border); padding: 10px 12px 12px; background: var(--panel); display: flex; flex-direction: column; gap: 6px; }
+.dt-composer-head { display: flex; align-items: center; justify-content: space-between; }
+.dt-composer-title { font-size: 12px; font-weight: 600; color: var(--text); }
+.dt-amend { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-2); cursor: pointer; user-select: none; }
+.dt-amend:has(.dt-amend-input:disabled) { color: var(--text-3); cursor: default; }
+.dt-amend:has(.dt-amend-input:checked) { color: var(--accent); }
+.dt-amend-input { margin: 0; accent-color: var(--accent); }
+.dt-summary-wrap { position: relative; display: flex; }
+.dt-summary-wrap .dt-summary { flex: 1; min-width: 0; padding-right: 34px; }
+.dt-summary-count {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%); pointer-events: none;
+  font: 11px var(--mono); color: var(--text-3);
+}
+.dt-summary-count.is-over { color: var(--red-text); font-weight: 600; }
+.dt-summary-wrap:has(.dt-summary-count.is-over) .dt-summary { border-color: color-mix(in srgb, var(--red) 60%, transparent); }
+.dt-summary, .dt-description {
+  font: 12px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--border);
+  border-radius: 4px; padding: 6px 8px; outline: none; resize: none; user-select: text;
+}
+.dt-summary:focus, .dt-description:focus { border-color: var(--focus-color); box-shadow: var(--focus-field); }
+.dt-summary-wrap:has(.dt-summary-count.is-over) .dt-summary:focus { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
+.dt-description { min-height: 64px; resize: vertical; max-height: 240px; }
+.dt-composer.is-committing .dt-summary, .dt-composer.is-committing .dt-description { opacity: 0.6; cursor: progress; }
+.dt-composer-actions { display: flex; }
+.dt-commit-btn {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  font-weight: 600; background: var(--green-solid); color: var(--text-strong); border-color: transparent;
+}
+.dt-commit-btn:not(:disabled):hover { background: var(--green-solid-hover); }
+.dt-commit-btn.is-amend { background: var(--accent); color: var(--text-on-light); }
+.dt-commit-btn.is-amend:not(:disabled):hover { background: var(--accent-hover); }
+.dt-commit-btn.is-amend .dt-spinner { border-color: color-mix(in srgb, var(--text-on-light) 30%, transparent); border-top-color: var(--text-on-light); }
+.btn.dt-commit-btn:disabled { background: color-mix(in srgb, var(--green) 35%, transparent); color: var(--text); opacity: 0.6; }
+.btn.dt-commit-btn.is-amend:disabled { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.dt-commit-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-spinner { display: none; flex: none; width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--white-35); border-top-color: var(--text-strong); animation: dt-spin 0.7s linear infinite; }
+.dt-commit-btn.is-running .dt-spinner { display: inline-block; }
+.btn.dt-commit-btn.is-running:disabled { opacity: 0.85; }
+@keyframes dt-spin { to { transform: rotate(360deg); } }
+
+/* Commit header */
+.dt-commit { flex: none; padding: 12px 14px 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; max-height: 55%; overflow-y: auto; }
+.dt-meta-row { display: flex; align-items: center; gap: 8px; font-size: 11px; min-width: 0; }
+.dt-meta-label { flex: none; width: 46px; color: var(--text-3); text-transform: lowercase; }
+.dt-sha { font: 11px var(--mono); color: var(--text-2); min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dt-copy {
+  flex: none; font: 600 10px var(--font); color: var(--text-2); background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 6px; cursor: pointer;
+}
+.dt-copy:hover { color: var(--text-strong); background: var(--panel-3); }
+.dt-copy.is-done { color: var(--green-bright); }
+.dt-parents { display: flex; flex-wrap: wrap; gap: 4px; }
+.dt-parent {
+  font: 11px var(--mono); color: var(--text-accent); background: none; border: 1px solid transparent; border-radius: 4px;
+  padding: 0 4px; cursor: pointer;
+}
+.dt-parent:hover { background: var(--blue-hover); border-color: color-mix(in srgb, var(--blue) 40%, transparent); }
+.dt-refs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.dt-ref { font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 9px; line-height: 18px; background: var(--white-8); color: var(--text); }
+.dt-ref-local { background: color-mix(in srgb, var(--blue) 18%, transparent); color: var(--blue-text); }
+.dt-ref-remote { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-text); }
+.dt-ref-tag { background: color-mix(in srgb, var(--yellow) 15%, transparent); color: var(--yellow); }
+.dt-ref-stash { background: color-mix(in srgb, var(--teal) 14%, transparent); color: var(--teal); font-family: var(--mono); font-weight: 500; }
+.dt-ref-head { background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--orange); }
+.dt-subject { margin: 6px 0 0; font-size: 15px; font-weight: 600; line-height: 1.35; color: var(--text-strong); overflow-wrap: anywhere; }
+.dt-message { font-size: 12px; line-height: 1.5; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.dt-author { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.dt-avatar {
+  flex: none; width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font: 700 11px var(--font); color: var(--text-strong); background: var(--panel-3);
+}
+.dt-author-info { min-width: 0; }
+.dt-author-name { font-size: 12px; color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-author-email { font-weight: 400; color: var(--text-3); }
+.dt-date { font-size: 11px; color: var(--text-3); }
+.dt-date-rel { color: var(--text-3); }
+
+.dt-files-head {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 7px 10px 7px 14px; background: var(--panel-2); border-bottom: 1px solid var(--border);
+}
+.dt-files-title { font-size: 12px; font-weight: 600; color: var(--text); }
+
+/* Git-derived names are bidi-isolated so an embedded RTL run can't reorder the text around it
+   (the control characters themselves are shown escaped by util.displayName). */
+.dt-file-dir, .dt-file-name, .dt-file-orig, .dt-folder-name, .dt-branch-pill, .dt-ref, .dt-subject, .dt-message,
+.dt-author-display, .dt-author-email { unicode-bidi: isolate; }
+.dt-file[aria-selected="true"]:focus-visible { box-shadow: var(--focus-inset), inset 2px 0 0 var(--focus-color); }
+
+/* Rebase / merge in progress (docs/plans/rebase.md §5.4): the conflict block and the composer modes */
+.dt-op-head {
+  flex: none; margin: 8px 12px 0; padding: 8px 10px; border-radius: var(--radius);
+  background: color-mix(in srgb, var(--orange) 14%, transparent); border: 1px solid color-mix(in srgb, var(--orange) 35%, transparent);
+}
+.dt-op-head[hidden] { display: none; }
+.dt-op-title { font-weight: 600; color: var(--orange-text); }
+.dt-op-text { margin-top: 2px; font-size: 12px; color: var(--text-2); }
+.dt-amend[hidden] { display: none; }
+.dt-commit-btn.is-continue { background: var(--blue); }
+.dt-commit-btn.is-continue:not(:disabled):hover { background: var(--primary-hover); }
+.btn.dt-commit-btn.is-continue:disabled { background: color-mix(in srgb, var(--blue) 30%, transparent); }
+.dt-continue-btn { margin-top: 8px; width: 100%; font-weight: 600; }
+.dt-continue-btn[hidden] { display: none; }
+.dt-stop-note {
+  margin: 0 0 8px; padding: 6px 8px; border-radius: var(--radius); font-size: 12px; color: var(--orange-text);
+  background: color-mix(in srgb, var(--orange) 12%, transparent); unicode-bidi: isolate;
+}

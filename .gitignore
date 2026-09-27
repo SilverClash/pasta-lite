@@ -1,0 +1,24 @@
+# Dependencies (no trailing slash: also matches a node_modules symlink)
+node_modules
+
+# OS and editor files
+.DS_Store
+
+# Logs
+*.log
+
+# Build and packaging output
+dist/
+out/
+*.tgz
+
+# Test coverage and SonarScanner work files
+coverage/
+.scannerwork/
+
+# Local environment files
+.env
+.env.*
+
+# Demo repositories from scripts/demo-repo.js (default: ./demo-repo and ./demo-repo.origin.git)
+demo-repo*/

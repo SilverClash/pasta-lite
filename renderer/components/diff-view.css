@@ -1,0 +1,184 @@
+/* diff-view component — unified diff replacing the graph. */
+.dv { background: var(--bg); }
+
+/* Header bar */
+.dv-header {
+  flex: none; min-height: 44px; display: flex; align-items: center; gap: 12px; justify-content: space-between;
+  padding: 6px 8px 6px 14px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.dv-title { min-width: 0; display: flex; align-items: center; gap: 10px; flex: 1; }
+.dv-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; user-select: text; direction: ltr; }
+.dv-path-dir { color: var(--text-3); }
+.dv-path-dir, .dv-path-name, .dv-path-old { unicode-bidi: isolate; }
+.dv-path-name { color: var(--text-strong); font-weight: 600; }
+.dv-path-old { color: var(--text-3); text-decoration: line-through; text-decoration-color: var(--white-25); }
+.dv-arrow { color: var(--blue); }
+.dv-badges { display: flex; gap: 5px; flex: none; }
+.dv-badge {
+  font: 600 10px/16px var(--font); text-transform: uppercase; letter-spacing: 0.04em; padding: 0 6px; border-radius: 3px;
+  background: var(--white-8); color: var(--text-2); white-space: nowrap;
+}
+.dv-badge-sha { font: 11px/16px var(--mono); text-transform: none; letter-spacing: 0; color: var(--text-accent); background: color-mix(in srgb, var(--text-accent) 12%, transparent); }
+.dv-badge-where-unstaged { color: var(--orange); background: color-mix(in srgb, var(--orange) 15%, transparent); }
+.dv-badge-where-staged { color: var(--green-bright); background: color-mix(in srgb, var(--green) 15%, transparent); }
+.dv-badge-where-untracked { color: var(--teal); background: color-mix(in srgb, var(--teal) 13%, transparent); }
+.dv-badge-where-conflicted { color: var(--text-strong); background: var(--red-solid); }
+.dv-badge-new { color: var(--green-bright); background: color-mix(in srgb, var(--green) 15%, transparent); }
+.dv-badge-deleted { color: var(--red-bright); background: color-mix(in srgb, var(--red) 18%, transparent); }
+.dv-badge-renamed { color: var(--blue-bright); background: color-mix(in srgb, var(--blue) 18%, transparent); }
+.dv-badge-binary { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.dv-badge-mode { color: var(--yellow); background: color-mix(in srgb, var(--yellow) 13%, transparent); text-transform: none; font-family: var(--mono); letter-spacing: 0; }
+
+.dv-header-right { display: flex; align-items: center; gap: 10px; flex: none; }
+.dv-stats { font: 600 12px var(--mono); display: flex; gap: 6px; }
+.dv-stat-add { color: var(--green-bright); }
+.dv-stat-del { color: var(--red-bright); }
+.dv-nav { display: flex; align-items: center; gap: 2px; }
+.dv-hunk-count { font-size: 11px; color: var(--text-3); padding: 0 4px; }
+.dv-icon-btn, .dv-close {
+  font: 14px/1 var(--font); color: var(--text-2); background: none; border: 1px solid transparent; border-radius: 4px;
+  width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.dv-icon-btn:hover, .dv-close:hover { color: var(--text-strong); background: var(--panel-3); }
+.dv-close { font-size: 20px; }
+.dv-icon-btn:focus-visible, .dv-close:focus-visible { outline-offset: -1px; }
+.dv-actions:empty { display: none; }
+
+/* Body */
+.dv-body { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.dv-banner {
+  flex: none; padding: 6px 14px; font-size: 12px; color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 10%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--yellow) 25%, transparent);
+}
+.dv-message { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.dv-message-text { color: var(--text-3); font-size: 13px; text-align: center; max-width: 520px; white-space: pre-wrap; word-break: break-word; }
+.dv-message-error .dv-message-text { color: var(--red-text-soft); user-select: text; }
+.dv-message-binary .dv-message-text { font-size: 14px; color: var(--text-2); }
+
+.dv-viewport { flex: 1; min-height: 0; position: relative; display: flex; }
+.dv-scroller { flex: 1; min-width: 0; overflow: auto; outline: none; position: relative; }
+.dv-spacer { position: relative; min-width: 100%; overflow: clip; } /* long lines never widen the scroll range */
+.dv-scroller:focus-visible { box-shadow: var(--focus-inset); }
+.dv-measure { position: absolute; visibility: hidden; white-space: pre; font: 12px var(--mono); }
+
+.dv-row {
+  position: absolute; left: 0; min-width: 100%; width: 100%; height: 20px; display: flex; align-items: stretch;
+  font: 12px/20px var(--mono); white-space: pre; tab-size: 4; color: var(--text);
+}
+.dv-gutter {
+  position: sticky; left: 0; z-index: 1; flex: none; display: flex;
+  background: var(--bg); border-right: 1px solid var(--border);
+}
+.dv-ln {
+  width: var(--dv-ln-w, 44px); padding: 0 6px; text-align: right; color: var(--text-3); font-size: 11px;
+  user-select: none;
+}
+.dv-sign { flex: none; width: 18px; text-align: center; color: var(--text-3); user-select: none; }
+.dv-text { flex: none; user-select: text; unicode-bidi: isolate; }
+.dv-cr { color: var(--text-3); opacity: 0.7; font-size: 11px; padding-left: 3px; user-select: none; }
+
+.dv-add { background: var(--diff-add); }
+.dv-add .dv-gutter { background: linear-gradient(var(--diff-add-strong), var(--diff-add-strong)), var(--bg); }
+.dv-add .dv-sign { color: var(--green); }
+.dv-add .dv-ln { color: var(--diff-add-ln); }
+.dv-del { background: var(--diff-del); }
+.dv-del .dv-gutter { background: linear-gradient(var(--diff-del-strong), var(--diff-del-strong)), var(--bg); }
+.dv-del .dv-sign { color: var(--red-bright); }
+.dv-del .dv-ln { color: var(--diff-del-ln); }
+.dv-context .dv-text { color: var(--text-2); }
+
+.dv-eof .dv-text { color: var(--text-3); font-style: italic; font-size: 11px; }
+
+.dv-hunk { background: var(--panel); color: var(--text-3); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.dv-gutter-hunk { border-right: 0; background: var(--panel); padding-left: 10px; }
+.dv-hunk-text { color: var(--text-accent); opacity: 0.75; font: 11px/20px var(--mono); white-space: pre; }
+/* z-index above the sticky gutter (z-index 1): a long hunk header runs under the buttons, never over them. */
+.dv-hunk-actions { display: flex; align-items: center; position: sticky; right: 0; z-index: 2; margin-left: auto; padding: 0 6px; gap: 4px; background: var(--panel); }
+.dv-row.dv-hunk:first-child { border-top: 0; }
+
+.dv-pinned {
+  position: absolute; left: 0; right: 10px; top: 0; height: 20px; z-index: 3; padding-left: 10px;
+  background: var(--panel); border-bottom: 1px solid var(--border); box-shadow: var(--shadow-pinned);
+  display: flex; align-items: center; pointer-events: none; overflow: hidden;
+}
+
+/* Control characters inside diff text (bidi overrides, zero-width, C0/C1) shown as markers. */
+.dv-ctl {
+  color: var(--bg); background: var(--orange); border-radius: 3px; padding: 0 1px; font-size: 11px; user-select: none;
+}
+.dv-clipped, .dv-hunk-truncated {
+  flex: none; margin-left: 8px; padding: 0 5px; font: italic 11px/20px var(--font); color: var(--yellow);
+  opacity: 0.85; user-select: none;
+}
+.dv-hunk-truncated { font-style: normal; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; }
+
+/* Multi-section diffs (typechange: deletion + new file) */
+.dv-section {
+  padding-left: 10px; font: 600 12px/20px var(--font); color: var(--text); background: var(--panel-2);
+  border-top: 1px solid var(--border); unicode-bidi: isolate;
+}
+.dv-row.dv-section:first-child { border-top: 0; }
+.dv-note { padding-left: 28px; font: italic 12px/20px var(--font); color: var(--text-3); }
+
+/* Conflict (combined diff) view */
+.dv-banner-conflict { color: var(--red-text-soft); background: color-mix(in srgb, var(--red) 12%, transparent); border-bottom-color: color-mix(in srgb, var(--red) 30%, transparent); }
+.dv-gutter-prefix { width: var(--dv-prefix-w, 36px); justify-content: flex-start; }
+.dv-prefix { padding: 0 8px; color: var(--text-3); white-space: pre; user-select: none; }
+.dv-cline.dv-add .dv-prefix { color: var(--green); }
+.dv-cline.dv-del .dv-prefix { color: var(--red-bright); }
+.dv-cline.dv-context .dv-text { color: var(--text-2); }
+.dv-conflict-marker { background: color-mix(in srgb, var(--yellow) 12%, transparent); }
+.dv-conflict-marker .dv-text { color: var(--yellow); font-weight: 600; }
+
+/* ---- Staging (M4): file / hunk buttons, line selection, selection bar, notes */
+.dv-act {
+  font: 600 11px/1 var(--font); color: var(--text); background: var(--panel-3);
+  border: 1px solid var(--white-12); border-radius: 4px; padding: 0 9px; height: 26px;
+  white-space: nowrap; cursor: pointer; display: inline-flex; align-items: center;
+}
+.dv-act:hover:not(:disabled) { color: var(--text-strong); background: var(--panel-3-hover); }
+.dv-act:disabled { opacity: 0.45; cursor: default; }
+.dv-act-stage { color: var(--text-strong); background: var(--green-solid); border-color: transparent; }
+.dv-act-stage:hover:not(:disabled) { background: var(--green-solid-hover); }
+.dv-act-unstage { color: var(--text-strong); background: var(--blue-solid); border-color: transparent; }
+.dv-act-unstage:hover:not(:disabled) { background: var(--blue-solid-hover); }
+.dv-act-discard { color: var(--red-text-soft); background: transparent; border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+.dv-act-discard:hover:not(:disabled) { color: var(--text-strong); background: var(--red-solid); border-color: transparent; }
+.dv-act-clear { background: transparent; color: var(--text-2); }
+.dv-file-actions { display: flex; align-items: center; gap: 6px; }
+
+/* Hunk header buttons (row and pinned copy): compact, sticky at the right edge. */
+.dv-hunk-actions .dv-act { height: 16px; padding: 0 7px; font-size: 10.5px; border-radius: 3px; }
+.dv-pinned .dv-hunk-actions { position: static; margin-left: auto; padding: 0 6px; pointer-events: auto; display: flex; gap: 4px; }
+.dv-hunk-na { font: italic 11px/20px var(--font); color: var(--text-3); cursor: help; }
+
+/* Selectable lines: the gutter is the handle; selected lines get a blue marker + tint. */
+.dv-row.is-pickable .dv-gutter, .dv-row.is-pickable .dv-sign { cursor: pointer; }
+.dv-row.is-pickable:hover .dv-gutter { box-shadow: inset 3px 0 0 color-mix(in srgb, var(--blue) 45%, transparent); }
+.dv-row.is-picked { background-image: linear-gradient(var(--blue-select), var(--blue-select)); }
+.dv-row.is-picked .dv-gutter { box-shadow: inset 3px 0 0 var(--blue); }
+.dv-row.is-picked .dv-ln { color: var(--text-strong); }
+.dv-row.is-picked .dv-sign { color: var(--text-strong); font-weight: 700; }
+/* Keyboard line cursor (↑/↓, Space), shown while the diff has focus. */
+.dv-scroller:focus .dv-row.is-cursor { box-shadow: var(--focus-inset); }
+
+.dv-selbar {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 4;
+  display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 14px; border-radius: 8px;
+  background: var(--surface-raised); border: 1px solid var(--white-12); box-shadow: var(--shadow-float);
+}
+.dv-selbar[hidden] { display: none; }
+.dv-selbar-count { font-size: 12px; color: var(--text); margin-right: 4px; white-space: nowrap; }
+
+.dv-stage-note {
+  flex: none; padding: 5px 14px; font-size: 12px; color: var(--text-3);
+  background: var(--white-3); border-bottom: 1px solid var(--border);
+}
+.dv-banner-stale {
+  display: flex; align-items: center; gap: 8px; color: var(--blue-bright);
+  background: color-mix(in srgb, var(--blue) 12%, transparent); border-bottom-color: color-mix(in srgb, var(--blue) 30%, transparent);
+}
+.dv-banner-text { flex: 1; }
+.dv-banner-close { background: none; border: 0; color: inherit; font-size: 16px; line-height: 1; cursor: pointer; padding: 0 4px; opacity: 0.8; }
+.dv-banner-close:hover { opacity: 1; }
+.dv.is-busy .dv-row.is-pickable .dv-gutter { cursor: progress; }

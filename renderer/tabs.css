@@ -1,0 +1,109 @@
+/* Tab strip (renderer/tabs.html): the window's own page, above the tab views. Colours
+   are style.css tokens. The strip is the window's drag region; tabs and buttons are not. */
+:root {
+  --strip-h: 38px;               /* main.js STRIP_H: the tab views start below it */
+  --tab-h: 32px;
+  --tab-max-w: 220px;
+  --tab-min-w: 72px;
+  --traffic-lights-w: 78px;      /* macOS: room for the traffic lights (trafficLightPosition x 14) */
+  --strip-bg: color-mix(in srgb, var(--bg) 70%, #000);
+  --tab-radius: 8px;
+}
+
+body.strip-page {
+  height: var(--strip-h);
+  background: var(--strip-bg);
+  flex-direction: row;
+  /* The line under the strip; the active tab covers it, so it joins the page below. */
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
+.strip {
+  flex: 1; min-width: 0;
+  display: flex; align-items: flex-end;
+  height: var(--strip-h);
+  padding: 0 8px;
+  -webkit-app-region: drag;
+}
+html.is-mac:not(.is-fullscreen) .strip { padding-left: var(--traffic-lights-w); }
+
+.tablist {
+  flex: 0 1 auto; min-width: 0;
+  display: flex; align-items: flex-end;
+  height: 100%;
+  overflow: hidden;
+}
+
+.tab {
+  -webkit-app-region: no-drag;
+  position: relative;
+  /* width too, not only the flex basis: the tablist's own (auto) width is summed from it. */
+  flex: 0 1 var(--tab-max-w); width: var(--tab-max-w);
+  min-width: var(--tab-min-w); max-width: var(--tab-max-w);
+  height: var(--tab-h);
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 6px 0 10px;
+  border-radius: var(--tab-radius) var(--tab-radius) 0 0;
+  color: var(--text-2);
+  cursor: default;
+  outline: none;
+}
+/* Separators between background tabs (none next to the active or a hovered one). */
+.tab + .tab::before {
+  content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 1px;
+  background: var(--white-12);
+}
+.tab:hover::before, .tab:hover + .tab::before,
+.tab[aria-selected="true"]::before, .tab[aria-selected="true"] + .tab::before { display: none; }
+.tab:hover { background: var(--white-4); color: var(--text); }
+/* The active tab takes the colour of the page right under it: the repo toolbar, or the welcome
+   screen's background for a New Tab. */
+.tab[aria-selected="true"] { background: var(--toolbar); color: var(--text-strong); z-index: 1; }
+.tab[aria-selected="true"].is-empty { background: var(--bg); }
+.tab:focus-visible { box-shadow: var(--focus-inset); }
+.tab.is-dragging { background: var(--panel-2); color: var(--text-strong); z-index: 2; box-shadow: var(--shadow-pinned); }
+
+.tab-icon { flex: none; width: 14px; height: 14px; color: var(--icon-muted); }
+.tab[aria-selected="true"] .tab-icon { color: var(--accent); }
+.tab.is-empty .tab-icon { opacity: 0.6; }
+.tab.is-busy .tab-icon { color: var(--blue); animation: tab-busy 1.2s ease-in-out infinite; }
+@keyframes tab-busy { 50% { opacity: 0.35; } }
+
+.tab-title {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px;
+}
+
+.tab-close {
+  -webkit-app-region: no-drag;
+  flex: none;
+  width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0; border: 0; border-radius: 4px;
+  background: none; color: var(--text-2);
+  font: 14px/1 var(--font);
+  visibility: hidden;
+}
+.tab:hover .tab-close, .tab[aria-selected="true"] .tab-close, .tab:focus-visible .tab-close { visibility: visible; }
+.tab-close:hover { background: var(--white-12); color: var(--text-strong); }
+
+.new-tab {
+  -webkit-app-region: no-drag;
+  flex: none;
+  width: 28px; height: 28px;
+  margin: 0 0 2px 4px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0; border: 0; border-radius: 6px;
+  background: none; color: var(--text-2);
+}
+.new-tab::before { content: '+'; font: 300 20px/1 var(--font); }
+.new-tab:hover { background: var(--white-8); color: var(--text-strong); }
+.new-tab:focus-visible { outline-offset: -2px; }
+
+/* Where a dragged tab would land. */
+.drop-marker {
+  position: absolute; top: 6px; bottom: 0; width: 2px;
+  background: var(--blue); border-radius: 1px;
+  pointer-events: none;
+}

@@ -1,0 +1,36 @@
+{
+  "name": "pasta-lite",
+  "version": "0.1.0",
+  "description": "Minimal graph-first desktop git client (Electron + git CLI)",
+  "keywords": [
+    "git",
+    "git-client",
+    "electron",
+    "gui",
+    "desktop"
+  ],
+  "homepage": "https://github.com/SilverClash/pasta-lite#readme",
+  "bugs": {
+    "url": "https://github.com/SilverClash/pasta-lite/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SilverClash/pasta-lite.git"
+  },
+  "license": "Apache-2.0",
+  "author": "Alex (https://github.com/SilverClash)",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "lint": "npx -y -p eslint@10.11.0 -p @eslint/js@10.0.1 -p globals@17.12.0 eslint ."
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "44.4.5"
+  }
+}

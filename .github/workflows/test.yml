@@ -1,0 +1,63 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      # Node 22 (the oldest supported, package.json engines) on both OSes, and the current LTS,
+      # Node 24, once on Ubuntu: three runs instead of four, since the platform-specific code
+      # (watcher, paths, git discovery) doesn't depend on the Node major.
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+        node: [22]
+        include:
+          - os: ubuntu-latest
+            node: 24
+    env:
+      # npm test never starts Electron (the tests load src/ and renderer/ under plain Node),
+      # so skip the Electron binary download in npm ci.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v7
+
+      # The app and its tests need git >= 2.51 (src/gitcheck.js); the runner images ship older ones.
+      - name: Install git (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo add-apt-repository -y ppa:git-core/ppa && sudo apt-get update && sudo apt-get install -y git
+
+      - name: Install git (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install git
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+      - name: git version
+        run: |
+          command -v git
+          git --version
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      # The tests set their own git identity and ignore the global config (test/helpers.js).
+      - run: npm test

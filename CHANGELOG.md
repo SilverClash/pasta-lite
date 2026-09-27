@@ -1,0 +1,70 @@
+# Changelog
+
+All notable changes to Pasta Lite are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
+adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the version is 0.x,
+minor versions may contain breaking changes.
+
+## [Unreleased]
+
+The first public release, planned as **0.1.0 (alpha)**. It runs from source (`npm start`) and
+needs Node.js 22.12 or newer and git 2.51 or newer. There are no packaged builds yet.
+
+### Added
+
+- **Commit graph**: a graph-first history of all branches, remotes, tags and stashes, with
+  coloured lanes. More history loads as you scroll. The graph has resizable columns, a commit
+  details panel, and a diff view for commits and for the working tree.
+- **Staging**: stage and unstage by file, by hunk or by selected lines. Discard changes the same
+  way, and a backup lets you undo a discard. Stage or unstage everything at once.
+- **Commits**: commit and amend, with the last message offered when you amend, and a commit
+  message draft that is kept per repository.
+- **Remotes**: fetch, pull (merge or rebase, including fast-forward only) and push. A push that
+  has to replace remote commits uses `--force-with-lease` against the remote-tracking ref you
+  last saw. You can set an upstream, and cancel a running fetch, pull or push.
+- **Branches**: check out, create and delete branches. Local changes that block a checkout are
+  stashed and restored automatically. The sidebar lists local and remote branches, tags and
+  stashes, with a filter.
+- **Toolbar branch switcher** with a search field.
+- **Stash**: stash, apply, pop and drop.
+- **Undo and redo** driven by the HEAD reflog: commits, checkouts, discards and branch deletion.
+- **Merge**: fast-forward, `--no-ff` or fast-forward only, with an automatic stash of local
+  changes that comes back when the merge is done. Conclude or abort a merge that stopped.
+- **Rebase**: rebase the current branch onto another. Interactive rebase has an editor to
+  reorder, pick, reword, edit, squash, fixup and drop commits. Continue, skip or abort a rebase,
+  and get a warning before rewriting commits that were already pushed.
+- **Conflicts**: see conflicted files, resolve a file with ours or theirs, and mark everything
+  resolved. A banner shows the merge or rebase in progress.
+- **Worktrees**: linked worktrees open like any repository. A branch checked out in another
+  worktree is reported clearly instead of failing with git's error.
+- **Bare repositories**: open a bare repository and browse its history. The banner lists its
+  worktrees and opens one in a tab. Operations that need a working tree are refused.
+- **Tabs**: one repository per tab, restored at the next start.
+- **Repository picker**: a start screen and toolbar picker with recent repositories, open tabs
+  and Open Repository.
+- **Trust prompt** before opening a repository whose own git config or hooks would run
+  commands, bare or not. The `ext::` transport is always blocked.
+- **Security**: sandboxed, context-isolated pages under a strict Content Security Policy, and an
+  allowlisted IPC surface in which main supplies each tab's repository.
+- **File watcher** that refreshes the view when the repository changes outside the app.
+- **Keyboard shortcuts** for the common actions, and Open in Terminal.
+- **Diagnostics**: local JSON-lines logs with credentials redacted, local crash reports, and Help →
+  Copy Diagnostics.
+- Checks at startup for git 2.51 or newer, including when the app is launched from Finder.
+- A dark theme, and the Pasta Lite logo and app icon.
+
+### Known limitations
+
+- No clone or init: open an existing repository.
+- No credential prompts: authentication has to work without one, through an SSH agent or a
+  credential helper. The app never shows a terminal prompt.
+- No cherry-pick, revert or reset.
+- No tags UI: tags are shown in the graph and the sidebar, but you can't create, delete or push
+  them.
+- Dark theme only.
+- Tested on macOS only. Windows and Linux are untested.
+- Authentication has only been tested against a local server. Real HTTPS and SSH remotes and
+  credential helpers have not been checked end to end yet.
+
+[Unreleased]: https://github.com/SilverClash/pasta-lite/commits/main

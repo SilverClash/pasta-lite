@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pasta Lite</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="components/toolbar.css">
+  <link rel="stylesheet" href="components/sidebar.css">
+  <link rel="stylesheet" href="components/graph-view.css">
+  <link rel="stylesheet" href="components/details.css">
+  <link rel="stylesheet" href="components/diff-view.css">
+  <link rel="stylesheet" href="components/op-banner.css">
+  <link rel="stylesheet" href="components/rebase-editor.css">
+  <link rel="stylesheet" href="components/repo-picker.css">
+</head>
+<body data-view="loading">
+  <header class="titlebar" id="titlebar">
+    <span class="titlebar-name">Pasta Lite</span>
+  </header>
+
+  <main id="welcome-view" class="welcome" hidden>
+    <!-- New Tab / no repo: filled by PLRepoPicker.mountStart (components/repo-picker.js) -->
+    <section class="welcome-card start" id="start-screen" aria-label="Open a repository"></section>
+    <footer class="welcome-footer muted small" id="git-version"></footer>
+  </main>
+
+  <div id="repo-view" class="repo" hidden>
+    <header class="toolbar" data-component="toolbar"></header>
+    <section class="op-banner" data-component="op-banner" aria-label="Operation in progress" hidden></section>
+    <div class="repo-main">
+      <aside class="sidebar" data-component="sidebar" aria-label="Branches, remotes, tags and stashes"></aside>
+      <main class="center">
+        <section class="graph-view" data-component="graph-view" aria-label="Commit graph"></section>
+        <section class="diff-view" data-component="diff-view" aria-label="Diff" hidden></section>
+        <section class="rebase-editor" data-component="rebase-editor" aria-label="Interactive rebase" hidden></section>
+      </main>
+      <aside class="details" data-component="details" aria-label="Details"></aside>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="alert" hidden></div>
+
+  <script src="graph.js"></script>
+  <script src="../src/error-kinds.js"></script>
+  <script src="components.js"></script>
+  <script src="keys.js"></script>
+  <script src="icons.js"></script>
+  <script src="op-model.js"></script>
+  <script src="policy.js"></script>
+  <script src="history-model.js"></script>
+  <script src="components/rebase-model.js"></script>
+  <script src="store.js"></script>
+  <script src="dialog.js"></script>
+  <script src="menu.js"></script>
+  <script src="menus.js"></script>
+  <script src="actions.js"></script>
+  <script src="flows-kit.js"></script>
+  <script src="flows-sync.js"></script>
+  <script src="flows-branch.js"></script>
+  <script src="flows-stash.js"></script>
+  <script src="flows-worktree.js"></script>
+  <script src="flows-op.js"></script>
+  <script src="flows-merge.js"></script>
+  <script src="flows-rebase.js"></script>
+  <script src="components/toolbar.js"></script>
+  <script src="components/repo-picker.js"></script>
+  <script src="components/op-banner.js"></script>
+  <script src="components/wip-model.js"></script>
+  <script src="components/sidebar.js"></script>
+  <script src="components/graph-columns.js"></script>
+  <script src="components/graph-view.js"></script>
+  <script src="components/file-list.js"></script>
+  <script src="components/composer.js"></script>
+  <script src="components/details.js"></script>
+  <script src="components/diff-model.js"></script>
+  <script src="components/diff-staging.js"></script>
+  <script src="components/diff-view.js"></script>
+  <script src="components/rebase-editor.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

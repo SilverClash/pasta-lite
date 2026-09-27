@@ -1,0 +1,29 @@
+{
+  "note": "git.status() of a merge of side into main with UU / UD / DU / AA conflicts (captured by a real run; staged / unstaged as git reported them)",
+  "branch": "main",
+  "state": "merging",
+  "staged": [],
+  "unstaged": [],
+  "conflicted": [
+    {
+      "path": "aa.txt",
+      "status": "U",
+      "xy": "AA"
+    },
+    {
+      "path": "both.txt",
+      "status": "U",
+      "xy": "UU"
+    },
+    {
+      "path": "du.txt",
+      "status": "U",
+      "xy": "DU"
+    },
+    {
+      "path": "ud.txt",
+      "status": "U",
+      "xy": "UD"
+    }
+  ]
+}
