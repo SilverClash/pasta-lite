@@ -24,13 +24,85 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
-    "lint": "npx -y -p eslint@10.11.0 -p @eslint/js@10.0.1 -p globals@17.12.0 eslint ."
+    "lint": "npx -y -p eslint@10.11.0 -p @eslint/js@10.0.1 -p globals@17.12.0 eslint .",
+    "dist:mac": "electron-builder --mac",
+    "dist:mac:unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac -c.mac.identity=null -c.mac.forceCodeSigning=false -c.mac.notarize=false",
+    "verify:mac": "sh scripts/verify-mac-build.sh"
   },
   "engines": {
     "node": ">=22.12.0"
   },
   "type": "commonjs",
   "devDependencies": {
-    "electron": "44.4.5"
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "io.github.silverclash.pastalite",
+    "productName": "Pasta Lite",
+    "copyright": "Copyright © 2026 Alex",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "main/**/*",
+      "src/**/*",
+      "renderer/**/*",
+      "preload.js",
+      "preload-tabs.js",
+      "assets/icon.icns",
+      "assets/icon.png",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "LICENSE",
+        "to": "LICENSE"
+      },
+      {
+        "from": "NOTICE",
+        "to": "NOTICE"
+      },
+      {
+        "from": "node_modules/electron/dist/LICENSE",
+        "to": "LICENSE.electron.txt"
+      },
+      {
+        "from": "node_modules/electron/dist/LICENSES.chromium.html",
+        "to": "LICENSES.chromium.html"
+      }
+    ],
+    "npmRebuild": false,
+    "publish": null,
+    "afterPack": "scripts/mac-adhoc-sign.js",
+    "afterAllArtifactBuild": "scripts/mac-notarize-dmg.js",
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/icon.icns",
+      "artifactName": "Pasta-Lite-${version}-${arch}.${ext}",
+      "type": "distribution",
+      "identity": "Developer ID Application",
+      "forceCodeSigning": true,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true
+    },
+    "dmg": {
+      "title": "${productName} ${version}",
+      "sign": true,
+      "writeUpdateInfo": false
+    }
   }
 }
