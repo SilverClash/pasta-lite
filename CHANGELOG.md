@@ -8,6 +8,12 @@ minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- The sidebar and the details panel can be resized: drag the handle on their inner edge (or focus
+  it and use the arrow keys). Double-click the handle to reset a panel. Widths are kept across
+  restarts.
+
 ## [0.1.0] - 2026-09-27
 
 The first public release, an **alpha**. Pasta Lite is a minimal, graph-first desktop git client
