@@ -8,6 +8,22 @@ minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- The sidebar and the details panel can be resized: drag the handle on their inner edge (or focus
+  it and use the arrow keys). Double-click the handle to reset a panel. Widths are kept across
+  restarts.
+
+### Changed
+
+- The app is now called **Pasta Lite Git client** (in the Finder, the Dock, the window title and
+  the app menu), so it is easier to find and clearly a git client. Your recent repositories, tabs,
+  trusted repositories and logs are kept: they stay in the existing `Pasta Lite` folders. The DMG
+  file names are unchanged (`Pasta-Lite-<version>-<arch>.dmg`). If you installed 0.1.0, delete
+  the old `Pasta Lite` app from Applications after installing the new one, and quit the old app
+  before opening the new one: only one copy runs at a time, so while 0.1.0 is open the new
+  version brings its window forward instead of starting.
+
 ## [0.1.0] - 2026-09-27
 
 The first public release, an **alpha**. Pasta Lite is a minimal, graph-first desktop git client

@@ -93,19 +93,19 @@ Anyone can build the DMGs on a Mac, with no Apple account:
 npm ci
 npm run dist:mac:unsigned
 # dist/Pasta-Lite-<version>-arm64.dmg, dist/Pasta-Lite-<version>-x64.dmg
-# dist/mac-arm64/Pasta Lite.app, dist/mac/Pasta Lite.app
+# dist/mac-arm64/Pasta Lite Git client.app, dist/mac/Pasta Lite Git client.app
 ```
 
 This build skips Developer ID signing and notarization. `scripts/mac-adhoc-sign.js` gives the app
 an ad-hoc signature instead, so it runs on the Mac that built it. On another Mac, Gatekeeper blocks
 it until you click Open Anyway in System Settings → Privacy & Security, or run
-`xattr -dr com.apple.quarantine "/Applications/Pasta Lite.app"`.
+`xattr -dr com.apple.quarantine "/Applications/Pasta Lite Git client.app"`.
 
 Packaged builds ignore `--smoke`. To smoke-test the packaged code, run it with the development
 Electron, which allows the harness:
 
 ```sh
-npx electron "dist/mac-arm64/Pasta Lite.app/Contents/Resources/app.asar" --smoke /path/to/repo out.png
+npx electron "dist/mac-arm64/Pasta Lite Git client.app/Contents/Resources/app.asar" --smoke /path/to/repo out.png
 ```
 
 ### Release build (maintainers)

@@ -229,8 +229,24 @@ kbd {
   background: var(--panel); border-left: 1px solid var(--border);
   display: flex; flex-direction: column;
 }
+/* Side-panel separators (components/panels.js, role="separator"): a 9px hit area centred on the
+   panel's inner border (negative margins: it takes no room in the row), invisible until hovered,
+   then a 3px blue bar under the pointer, while dragged and when focused. */
+.pn-resize {
+  flex: none; position: relative; z-index: 5;
+  width: 9px; margin: 0 -4px 0 -5px;
+  cursor: col-resize; touch-action: none;
+}
+.pn-resize::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 3px;
+  background: transparent; transition: background-color 0.1s;
+}
+.pn-resize:hover::after, .pn-resize.is-active::after, .pn-resize:focus-visible::after { background: var(--blue); }
+.pn-resize:focus-visible { outline: none; }
+body.pn-resizing, body.pn-resizing * { cursor: col-resize !important; user-select: none; }
 .placeholder { padding: 12px; }
-/* Narrow windows: shrink the side panels so the graph keeps a usable width. */
+/* Narrow windows: shrink the side panels so the graph keeps a usable width (the defaults; a width
+   the user dragged is set on .repo-main by components/panels.js and overrides these). */
 @media (max-width: 1200px) { :root { --sidebar-w: 220px; --details-w: 320px; } }
 @media (max-width: 1000px) { :root { --sidebar-w: 200px; --details-w: 280px; } }
 

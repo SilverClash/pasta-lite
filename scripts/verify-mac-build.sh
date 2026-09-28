@@ -4,7 +4,7 @@
 # check fails. An unsigned build (npm run dist:mac:unsigned) is expected to fail the Gatekeeper
 # and stapler checks.
 #
-#   sh scripts/verify-mac-build.sh                 # dist/mac*/Pasta Lite.app and dist/*.dmg
+#   sh scripts/verify-mac-build.sh                 # dist/mac*/Pasta Lite Git client.app and dist/*.dmg
 #   sh scripts/verify-mac-build.sh path/to/X.dmg   # specific files
 set -u
 cd "$(dirname "$0")/.." || exit 1
