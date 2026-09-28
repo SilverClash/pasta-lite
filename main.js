@@ -38,7 +38,7 @@ const { createRepoOpening, shouldForgetRecent } = require('./src/repo-opening');
 const { createRecentView } = require('./src/recent-view');
 const { openTerminal } = require('./src/terminal');
 const { EVENTS } = require('./src/ipc-contract');
-const { createWindowHost, APP_NAME, ICON, STRIP_H, SECURE_WEB_PREFS } = require('./main/window');
+const { createWindowHost, APP_NAME, DATA_DIR_NAME, ICON, STRIP_H, SECURE_WEB_PREFS } = require('./main/window');
 const { createTabsController } = require('./main/tabs-controller');
 const { createSenderContext, registerChannels, createHandlers } = require('./main/ipc');
 const { createAppMenu } = require('./main/menu');
@@ -337,10 +337,25 @@ process.on('exit', () => logger.flushSync());
 app.enableSandbox();
 app.setName(APP_NAME);
 
+/**
+ * setName moves the default userData, logs and crash-dump folders to the new name. Pin them to
+ * DATA_DIR_NAME (main/window.js) so data from before the rename is kept. Before the
+ * single-instance lock, which lives in userData.
+ */
+function pinDataPaths() {
+  const userData = path.join(app.getPath('appData'), DATA_DIR_NAME);
+  app.setPath('userData', userData);
+  app.setAppLogsPath(process.platform === 'darwin'
+    ? path.join(app.getPath('home'), 'Library', 'Logs', DATA_DIR_NAME)
+    : path.join(userData, 'logs'));
+  app.setPath('crashDumps', path.join(userData, 'Crashpad'));
+}
+
 // Smoke runs are their own primary instance with a throwaway userData (main/smoke.js).
 if (harness) harness.setupUserData();
-else if (!app.requestSingleInstanceLock()) {
-  app.quit();
+else {
+  pinDataPaths();
+  if (!app.requestSingleInstanceLock()) app.quit();
 }
 
 /**

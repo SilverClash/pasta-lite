@@ -6,7 +6,12 @@ const path = require('node:path');
 const { BrowserWindow, dialog } = require('electron');
 
 const ROOT = path.join(__dirname, '..');
-const APP_NAME = 'Pasta Lite';
+// The user-facing name: window title, macOS app menu (About / Hide / Quit), dialogs, diagnostics.
+const APP_NAME = 'Pasta Lite Git client';
+// The name of the on-disk folders (userData, logs, crash dumps). It stays the pre-rename
+// "Pasta Lite" so existing installs keep their recent list, tabs, trusted repos and logs;
+// app.setName(APP_NAME) alone would move them (main.js pins them to this name).
+const DATA_DIR_NAME = 'Pasta Lite';
 // The app icon (assets/). Windows and Linux take it from the window; macOS from the bundle, or
 // from app.dock.setIcon in a dev run (main.js).
 const ICON = path.join(ROOT, 'assets', 'icon.png');
@@ -88,4 +93,4 @@ function createWindowHost({ ui, isMac, stripUrl, addKeys, report, hooks }) {
   };
 }
 
-module.exports = { createWindowHost, APP_NAME, ICON, STRIP_H, BG, SECURE_WEB_PREFS };
+module.exports = { createWindowHost, APP_NAME, DATA_DIR_NAME, ICON, STRIP_H, BG, SECURE_WEB_PREFS };

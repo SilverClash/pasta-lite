@@ -39,7 +39,7 @@
   },
   "build": {
     "appId": "io.github.silverclash.pastalite",
-    "productName": "Pasta Lite",
+    "productName": "Pasta Lite Git client",
     "copyright": "Copyright © 2026 Alex",
     "directories": {
       "output": "dist"

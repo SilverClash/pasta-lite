@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/icon.png" alt="Pasta Lite" width="128" height="128">
+  <img src="assets/icon.png" alt="Pasta Lite Git client" width="128" height="128">
 </p>
 
-<h1 align="center">Pasta Lite</h1>
+<h1 align="center">Pasta Lite Git client</h1>
 
 <p align="center"><em>Untangle your history</em></p>
 
@@ -87,7 +87,7 @@ Download the DMG for your Mac from the [Releases page](https://github.com/Silver
 | Apple silicon (M1 and later) | `Pasta-Lite-<version>-arm64.dmg` |
 | Intel | `Pasta-Lite-<version>-x64.dmg` |
 
-Not sure which one you have? Choose Apple menu → About This Mac: an Apple silicon Mac lists a "Chip" such as Apple M2, an Intel Mac lists a "Processor". Open the DMG and drag Pasta Lite to Applications.
+Not sure which one you have? Choose Apple menu → About This Mac: an Apple silicon Mac lists a "Chip" such as Apple M2, an Intel Mac lists a "Processor". Open the DMG and drag Pasta Lite Git client to Applications.
 
 The app is signed with a Developer ID and notarized by Apple, so it opens like any other app. If macOS still refuses to open it, go to System Settings → Privacy & Security and click Open Anyway.
 
