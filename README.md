@@ -80,7 +80,7 @@ your system `git`, so your existing SSH keys, credential helper and git config j
 
 ## Download
 
-Download the DMG for your Mac from the [Releases page](https://github.com/SilverClash/pasta-lite/releases):
+Download the DMG for your Mac from the [Releases page](https://github.com/SilverClash/pasta-lite-git-client/releases):
 
 | Your Mac | File |
 | --- | --- |
@@ -96,8 +96,8 @@ The app is signed with a Developer ID and notarized by Apple, so it opens like a
 To run it from source instead:
 
 ```sh
-git clone https://github.com/SilverClash/pasta-lite.git
-cd pasta-lite
+git clone https://github.com/SilverClash/pasta-lite-git-client.git
+cd pasta-lite-git-client
 npm ci
 npm start
 ```
@@ -154,6 +154,6 @@ Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ### Trademarks
 
-"Pasta Lite" and its logo (the files in `assets/`) are trademarks of Alex and are not covered by the
-Apache license. If you fork or redistribute the project, please use a different name and logo
-unless you have permission. Using the name to refer to or describe the project is fine.
+"Pasta Lite" and its logo (the files in `assets/`) are trademarks of Alexey Zhuravlev and are not
+covered by the Apache license. If you fork or redistribute the project, please use a different name
+and logo unless you have permission. Using the name to refer to or describe the project is fine.

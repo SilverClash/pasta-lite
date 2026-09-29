@@ -9,13 +9,13 @@
     "gui",
     "desktop"
   ],
-  "homepage": "https://github.com/SilverClash/pasta-lite#readme",
+  "homepage": "https://github.com/SilverClash/pasta-lite-git-client#readme",
   "bugs": {
-    "url": "https://github.com/SilverClash/pasta-lite/issues"
+    "url": "https://github.com/SilverClash/pasta-lite-git-client/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SilverClash/pasta-lite.git"
+    "url": "git+https://github.com/SilverClash/pasta-lite-git-client.git"
   },
   "license": "Apache-2.0",
   "author": "Alex (https://github.com/SilverClash)",
