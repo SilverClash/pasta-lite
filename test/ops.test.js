@@ -30,7 +30,7 @@ test('registry has exactly the documented operations', () => {
   const reads = ['status', 'refs', 'log', 'stashes', 'commitDiffView', 'workdirDiffView', 'commitFiles', 'diffCommitFile', 'diffWorkdir', 'undoState', 'remotes', 'lastCommitMessage', 'rebasePlan', 'worktrees'];
   const writes = [
     'stage', 'stageAll', 'unstage', 'unstageAll', 'stageSelection', 'unstageSelection', 'discardSelection', 'discard',
-    'commit', 'commitAll', 'fetch', 'pull', 'push', 'setUpstream', 'checkout', 'createBranch', 'deleteBranch',
+    'commit', 'commitAll', 'fetch', 'pull', 'push', 'setUpstream', 'checkout', 'createBranch', 'deleteBranch', 'deleteBranches',
     'stashPush', 'stashApply', 'stashPop', 'stashDrop', 'undo', 'redo',
     'rebaseContinue', 'rebaseSkip', 'rebaseAbort', 'restoreAutostash', 'mergeCommit', 'mergeAbort',
     'merge', 'rebase', 'resolveWith', 'markAllResolved', 'rebaseInteractive',
@@ -205,6 +205,60 @@ test('deleteBranch records the deletion, so undo recreates the branch', async ()
   assert.equal((await runner.run(dir, 'undoState')).undo.action, 'delete_branch');
   await runner.run(dir, 'undo');
   assert.equal(h.git(dir, 'rev-parse', 'feat/x').trim(), sha);
+});
+
+test('deleteBranches: deletes what it can in one write, reports the rest; force; each delete undoable', async () => {
+  const dir = h.initRepo();
+  const runner = ops.createRunner();
+  const events = [];
+  runner.on('changed', (e) => events.push(e));
+  const { sha: a } = await runner.run(dir, 'createBranch', ['chore/a']);
+  await runner.run(dir, 'createBranch', ['chore/wip', { checkout: true }]);
+  h.write(dir, 'wip.txt', 'wip\n');
+  h.git(dir, 'add', 'wip.txt');
+  h.git(dir, 'commit', '-q', '-m', 'wip');
+  await runner.run(dir, 'checkout', ['main']);
+  await assert.rejects(runner.run(dir, 'deleteBranches', [[]]), { kind: 'invalid-args' });
+  await assert.rejects(runner.run(dir, 'deleteBranches', [['ok', '-D']]), { kind: 'invalid-args' });
+  events.length = 0;
+  const res = await runner.run(dir, 'deleteBranches', [['chore/a', 'main', 'chore/wip', 'nope', 'chore/a']]);
+  assert.deepEqual(res.deleted, [{ name: 'chore/a', sha: a, upstream: null }]);
+  assert.deepEqual(res.failed.map((f) => [f.name, f.kind]), [['main', 'current-branch'], ['chore/wip', 'not-merged'], ['nope', 'not-found']]);
+  assert.ok(res.failed.every((f) => typeof f.message === 'string' && f.message));
+  assert.equal(events.length, 1, 'one changed event');
+  const forced = await runner.run(dir, 'deleteBranches', [['chore/wip'], { force: true }]);
+  assert.deepEqual(forced.deleted.map((d) => d.name), ['chore/wip']);
+  assert.equal(h.git(dir, 'for-each-ref', 'refs/heads/chore').trim(), '');
+  await runner.run(dir, 'undo');
+  assert.ok(h.git(dir, 'rev-parse', '--verify', 'chore/wip').trim());
+  await runner.run(dir, 'undo');
+  assert.equal(h.git(dir, 'rev-parse', 'chore/a').trim(), a);
+});
+
+test('deleteBranches: stops between branches once cancelled (the rest fail as aborted); HEAD and the branches are read once', async () => {
+  const dir = h.initRepo();
+  for (const n of ['x/a', 'x/b', 'x/c']) h.git(dir, 'branch', n);
+  const git = require('../src/git');
+  const { check, act } = ops.DESCRIPTORS.deleteBranches;
+  const args = await check(dir, ['x/a', 'x/b', 'x/c'], {});
+  const ctrl = new AbortController();
+  const realRemove = git.removeBranch;
+  const realTips = git.branchTips;
+  let tipsReads = 0;
+  git.branchTips = (...a) => { tipsReads++; return realTips(...a); };
+  git.removeBranch = async (...a) => { const r = await realRemove(...a); ctrl.abort(); return r; };
+  try {
+    const res = await act(dir, ...args, ctrl.signal);
+    assert.deepEqual(res.deleted.map((d) => d.name), ['x/a']);
+    assert.deepEqual(res.failed.map((f) => [f.name, f.kind]), [['x/b', 'aborted'], ['x/c', 'aborted']]);
+    assert.equal(tipsReads, 1);
+  } finally {
+    git.removeBranch = realRemove;
+    git.branchTips = realTips;
+  }
+  assert.equal(h.git(dir, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/x').trim(), 'x/b\nx/c');
+  const undone = await ops.OPS.undo(dir);
+  assert.match(undone.description, /x\/a/);
 });
 
 test('stash ops and checkout through the registry', async () => {

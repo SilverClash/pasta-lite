@@ -21,6 +21,11 @@
 //   checkoutItem({target, kind, label?, title?, current?}) -> the one checkout descriptor (current:
 //                                   disabled, "Already checked out"); createHere(ref) -> "Create branch here…"
 //   upstreamTarget(state, name), behindOf(state, name), deleteItem(ref, state), fullRef(kind, name)
+//   deleteRefusal(name, state, {current?}) -> {why, title} | null   why a local branch can't be deleted
+//                                   (deleteItem, deletableBranches and the delete flows)
+//   deletableBranches(names, state) -> {names, skipped: [{name, why, title}]}   what a bulk delete removes
+//   deleteBranchesItem(names, state, {label?(n), flows?}) -> the finished "Delete N branches" descriptor
+//                                   (sidebar multi-selection and folder menus; N: the deletable ones)
 // "Finished": gated (PLPolicy.gateItems) and disabled while busy or without their flow
 // (Components.actions.finishItems, looked up when a menu is built: actions.js loads after this script).
 (function () {
@@ -213,17 +218,64 @@
   const createHere = (ref) => ({ label: 'Create branch here…', flow: 'createBranch', args: [{ start: ref.oid }] });
 
   /**
-   * "Delete" of local branch ref: disabled for the checked-out branch (in a bare repository: the
-   * branch HEAD points at) and for a branch checked out in a linked worktree (state.worktrees, read
-   * for bare repositories; git refuses to delete it).
+   * Why local branch `name` can't be deleted, or null: {why, title} (display-safe). `why` is short
+   * ('checked out', 'HEAD of the bare repository', 'checked out in the worktree <path>'), `title` the
+   * menu item's reason. Refused: the checked-out branch (in a bare repository: the branch HEAD points
+   * at; `current` also counts the caller's ref as it) and a branch checked out in a linked worktree
+   * (state.worktrees: kept by the store for bare repositories, re-read by the delete flows; git
+   * refuses to delete it). The one source for deleteItem and deletableBranches.
    */
+  function deleteRefusal(name, state, { current = false } = {}) {
+    const s = state || {};
+    const b = ((s.refs && s.refs.local) || []).find((x) => x.name === name);
+    if (current || (b && b.current) || name === headView(s).branch) {
+      return isBare(s)
+        ? { why: 'HEAD of the bare repository', title: 'HEAD of the bare repository points at this branch: it can’t be deleted' }
+        : { why: 'checked out', title: 'The checked-out branch can’t be deleted: check out another branch first' };
+    }
+    const wt = (Array.isArray(s.worktrees) ? s.worktrees : []).find((w) => w && !w.bare && w.branch === name);
+    if (!wt) return null;
+    const why = `checked out in the worktree ${displayName(wt.path)}`;
+    return { why, title: `${displayName(name)} is ${why}: it can’t be deleted` };
+  }
+
+  /** "Delete" of local branch ref: disabled with deleteRefusal's reason. */
   function deleteItem(ref, state) {
     const d = { label: 'Delete', flow: 'deleteBranch', args: [ref.name], danger: true };
-    if (ref.current) {
-      return { ...d, disabled: true, title: isBare(state) ? 'HEAD of the bare repository points at this branch: it can’t be deleted' : 'The checked-out branch can’t be deleted: check out another branch first' };
+    const no = deleteRefusal(ref.name, state, { current: ref.current });
+    return no ? { ...d, disabled: true, title: no.title } : d;
+  }
+
+  /**
+   * The local branches of `names` a bulk delete removes, and the ones it leaves out (deleteRefusal):
+   * {names, skipped: [{name, why, title}]}. Order kept, duplicates dropped.
+   */
+  function deletableBranches(names, state) {
+    const out = { names: [], skipped: [] };
+    for (const name of new Set((names || []).filter((n) => typeof n === 'string' && n))) {
+      const no = deleteRefusal(name, state);
+      if (no) out.skipped.push({ name, ...no });
+      else out.names.push(name);
     }
-    const wt = (Array.isArray(state.worktrees) ? state.worktrees : []).find((w) => w && !w.bare && w.branch === ref.name);
-    return wt ? { ...d, disabled: true, title: `${displayName(ref.name)} is checked out in the worktree ${displayName(wt.path)}: it can’t be deleted` } : d;
+    return out;
+  }
+
+  /**
+   * The one "Delete N branches" descriptor (finished) of local branches `names` (a multi-selection,
+   * a sidebar folder): flow deleteBranches with all of them (the flow says which it leaves out).
+   * N counts the ones it deletes (deletableBranches); none: disabled with the reason. `label(n)`
+   * replaces the default label.
+   */
+  function deleteBranchesItem(names, state, { label, flows = flowsOf() } = {}) {
+    const list = [...new Set(names || [])];
+    const { names: ok, skipped } = deletableBranches(list, state);
+    const n = ok.length || list.length;
+    const d = { label: label ? label(n) : `Delete ${plural(n, 'branch', 'branches')}`, flow: 'deleteBranches', args: [list], danger: true };
+    const off = ok.length ? d : {
+      ...d, disabled: true,
+      title: skipped.length === 1 ? skipped[0].title : 'None of these branches can be deleted',
+    };
+    return finish([off], state || {}, flows)[0];
   }
 
   /**
@@ -285,6 +337,7 @@
 
   const api = {
     refMenuItems, commitOpItems, commitItems, stashMenuItems, checkoutItem, createHere, upstreamTarget, behindOf, deleteItem, fullRef,
+    deleteRefusal, deletableBranches, deleteBranchesItem,
   };
   if (typeof window !== 'undefined') window.PLMenus = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

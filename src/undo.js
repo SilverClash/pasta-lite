@@ -88,9 +88,9 @@ const branchTip = (cwd, name) => git.resolveCommit(cwd, fullBranch(name));
 /** True when object `sha` exists and peels to a `type` ('commit', 'tree'). */
 const objectExists = async (cwd, sha, type = 'commit') => (await git.verify(cwd, `${sha}^{${type}}`)) !== null;
 
-/** Append a HEAD reflog entry without moving any ref. */
-async function appendReflog(cwd, message) {
-  const sha = (await headState(cwd)).sha || (await zeroOid(cwd));
+/** Append a HEAD reflog entry without moving any ref. `at`: HEAD's sha when the caller knows it. */
+async function appendReflog(cwd, message, at) {
+  const sha = at || (await headState(cwd)).sha || (await zeroOid(cwd));
   await run(cwd, ['reflog', 'write', 'HEAD', sha, sha, message]);
 }
 
@@ -708,9 +708,12 @@ async function withDiscardBackup(cwd, paths, fn) {
   return { result, backup: after };
 }
 
-/** Log a branch deletion so it can be undone. Call right after deleting the branch. */
-async function recordBranchDelete(cwd, { name, sha, upstream }) {
-  await appendReflog(cwd, `${REFLOG_DELETE_BRANCH} ${name} ${upstream || '-'} [${sha}]`);
+/**
+ * Log a branch deletion so it can be undone. Call right after deleting the branch. `at`: HEAD's sha
+ * when the caller already read it (several deletes in a row: a branch delete never moves HEAD).
+ */
+async function recordBranchDelete(cwd, { name, sha, upstream }, { at } = {}) {
+  await appendReflog(cwd, `${REFLOG_DELETE_BRANCH} ${name} ${upstream || '-'} [${sha}]`, at);
 }
 
 module.exports = {

@@ -3,14 +3,19 @@
 // Contract: flows-kit.js.
 //   checkout(store, {target, kind})   kind 'local' (name) | 'remote' ('origin/x') | 'commit' (full sha)
 //   createBranch(store, {start?, checkout = true}?)   never checks out in a bare repository
-//   deleteBranch(store, name)
+//   deleteBranch(store, name)      refused (an alert) for the current branch and one checked out in a
+//                                   linked worktree (the worktrees re-read first)
+//   deleteBranches(store, names)   several local branches, one confirmation (the checked-out branch and
+//                                   branches of linked worktrees are left out, and the dialog says so)
+// Shared by both: withWorktrees (the state with the worktrees re-read), confirmForce (the force-delete
+// question), and PLMenus.deleteRefusal (why a branch can't be deleted).
 //   branchNameError(name, refs) -> string | null   the create-branch validation (pure)
 // Kit additions: checkoutInner (flows-rebase.js checks a branch out before rebasing it), syntaxError
 // (flows-sync.js' setUpstream validates the remote branch name with it).
 // All git-derived text reaches the DOM through the dialogs / toasts (textContent only).
 (function () {
   const K = window.PLFlowKit;
-  const { settle, report, dialog, dn, short, status, currentBranch, keptStashTitle, keptStashText, stashNote } = K;
+  const { C, settle, report, dialog, dn, short, status, currentBranch, keptStashTitle, keptStashText, stashNote } = K;
   const P = window.PLPolicy;
   const undoKey = () => window.PLKeys.keyHint('undo');
 
@@ -129,10 +134,45 @@
     return false;
   }
 
+  const branches = (n) => C.util.plural(n, 'branch', 'branches');
+  /** Every name, one per line (display-safe): the dialog's detail box scrolls. */
+  const nameList = (store, names) => dialog(store).pathListText(names, names.length);
+
+  /**
+   * store.state with state.worktrees re-read: the store keeps them for bare repositories only, and a
+   * branch checked out in a linked worktree of a normal repository can't be deleted either. A failed
+   * read keeps the store's list (git still refuses such a branch, and the flow reports it).
+   */
+  async function withWorktrees(store) {
+    const { value } = await settle(store.invoke('worktrees'));
+    return Array.isArray(value) ? { ...store.state, worktrees: value } : store.state;
+  }
+
+  /**
+   * The force-delete question for the local branches `names` that aren't fully merged (one or
+   * several; several are listed). Resolves true to force-delete them.
+   */
+  function confirmForce(store, names) {
+    const one = names.length === 1;
+    return dialog(store).confirm({
+      title: one ? 'Branch not fully merged' : `${names.length} branches not fully merged`,
+      message: `${one ? `${dn(names[0])} has` : 'These branches have'} commits that aren't merged into ${one ? 'its' : 'their'} upstream or the current branch. Delete ${one ? 'it' : 'them'} anyway?`
+        + `\n\nYou can still undo this with Undo (${undoKey()}).`,
+      ...(one ? {} : { detail: nameList(store, names) }),
+      confirmLabel: 'Force Delete',
+      danger: true,
+    });
+  }
+
   async function deleteBranchFlow(store, name) {
     if (typeof name !== 'string' || !name) return false;
     if (name === currentBranch(store)) {
       await dialog(store).alert({ title: 'Cannot delete the current branch', message: `Check out another branch before deleting ${dn(name)}.` });
+      return false;
+    }
+    const refused = C.actions.deleteRefusal(name, await withWorktrees(store));
+    if (refused) {
+      await dialog(store).alert({ title: 'Cannot delete this branch', message: refused.title });
       return false;
     }
     const ok = await dialog(store).confirm({
@@ -145,18 +185,61 @@
     const first = await settle(store.actions.write('deleteBranch', [name, {}], { quiet: ['not-merged'] }));
     if (first.error) {
       if (first.error.kind !== 'not-merged') { report(store, first.error); return false; }
-      const force = await dialog(store).confirm({
-        title: 'Branch not fully merged',
-        message: `${dn(name)} has commits that aren't merged into its upstream or the current branch. Delete it anyway?\n\nYou can still undo this with Undo (${undoKey()}).`,
-        confirmLabel: 'Force Delete',
-        danger: true,
-      });
-      if (!force) return false;
+      if (!(await confirmForce(store, [name]))) return false;
     }
     const res = first.error ? await store.actions.write('deleteBranch', [name, { force: true }]) : first.value;
     if (res && res.warning) await dialog(store).alert({ title: 'Branch deleted', message: res.warning });
     else store.actions.notify(`Deleted branch ${dn(name)}${res && res.sha ? ` (was ${short(res.sha)})` : ''}`);
     return true;
+  }
+
+  /**
+   * Delete local branches `names` after one confirmation that lists them. Left out (and named in the
+   * dialog): what deleteBranch refuses (C.actions.deletableBranches, with the worktrees re-read);
+   * nothing left: an alert. One deleteBranches write deletes them in turn; branches that aren't fully
+   * merged are offered for a force delete together (confirmForce, as deleteBranch does for one), and
+   * what still failed (a failed force write too) is listed at the end without undoing the rest.
+   */
+  async function deleteBranchesFlow(store, names) {
+    const { names: todo, skipped } = C.actions.deletableBranches(Array.isArray(names) ? names : [], await withWorktrees(store));
+    const skippedNote = skipped.length ? `Not deleted: ${skipped.map((x) => `${dn(x.name)} (${x.why})`).join(', ')}.` : '';
+    if (!todo.length) {
+      if (skipped.length) await dialog(store).alert({ title: 'Nothing to delete', message: skippedNote });
+      return false;
+    }
+    const ok = await dialog(store).confirm({
+      title: `Delete ${branches(todo.length)}?`,
+      message: `Delete ${todo.length === 1 ? 'this local branch' : `these ${todo.length} local branches`}? Remote branches are not touched.`
+        + `${skippedNote ? `\n\n${skippedNote}` : ''}\n\nYou can undo this with Undo (${undoKey()}), one branch at a time.`,
+      detail: nameList(store, todo),
+      confirmLabel: `Delete ${branches(todo.length)}`,
+      danger: true,
+    });
+    if (!ok) return false;
+    const first = await store.actions.write('deleteBranches', [todo, {}]);
+    const unmerged = first.failed.filter((f) => f.kind === 'not-merged').map((f) => f.name);
+    const force = unmerged.length > 0 && await confirmForce(store, unmerged);
+    const none = { deleted: [], failed: [] };
+    const { value: forced = none, error } = force ? await settle(store.actions.write('deleteBranches', [unmerged, { force: true }])) : { value: none };
+    // a force write that rejected (toasted by write) still gets the summary of the first one
+    const forceFailed = error && error.kind !== 'repo-changed'
+      ? unmerged.map((n) => ({ name: n, message: error.message || String(error) }))
+      : [];
+    const deleted = [...first.deleted, ...forced.deleted];
+    const failed = [...first.failed.filter((f) => f.kind !== 'not-merged'), ...forced.failed, ...forceFailed];
+    const kept = force ? [] : unmerged;
+    const warnings = deleted.filter((d) => d.warning).map((d) => `${dn(d.name)}: ${d.warning}`);
+    if (failed.length || warnings.length) {
+      await dialog(store).alert({
+        title: failed.length ? `${branches(failed.length)} could not be deleted` : `Deleted ${branches(deleted.length)}`,
+        message: `Deleted ${branches(deleted.length)}${kept.length ? `, kept ${kept.length} not fully merged` : ''}.`
+          + `${failed.length ? ' Not deleted:' : ''}`,
+        detail: [...failed.map((f) => `${dn(f.name)}: ${f.message}`), ...warnings].join('\n'),
+      });
+    } else {
+      store.actions.notify(`Deleted ${branches(deleted.length)}${kept.length ? ` (kept ${kept.length} not fully merged)` : ''}`);
+    }
+    return deleted.length > 0;
   }
 
   Object.assign(K, { checkoutInner, syntaxError });
@@ -165,5 +248,6 @@
     checkout: checkoutFlow,
     createBranch: createBranchFlow,
     deleteBranch: deleteBranchFlow,
+    deleteBranches: deleteBranchesFlow,
   });
 })();

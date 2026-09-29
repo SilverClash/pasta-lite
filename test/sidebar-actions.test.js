@@ -29,7 +29,7 @@ const SHA = (c) => c.repeat(40);
 /** Fake PLFlows: records every call as [name, ...args] and resolves true. */
 function fakeFlows({ withUpstream = true } = {}) {
   const calls = [];
-  const names = ['checkout', 'createBranch', 'deleteBranch', 'push', 'pull', 'fetch', 'stashPop', 'stashApply', 'stashDrop'];
+  const names = ['checkout', 'createBranch', 'deleteBranch', 'deleteBranches', 'push', 'pull', 'fetch', 'stashPop', 'stashApply', 'stashDrop'];
   if (withUpstream) names.push('setUpstream');
   const flows = { calls };
   for (const n of names) flows[n] = async (store, ...args) => { calls.push([n, store, ...args]); return true; };
@@ -391,8 +391,8 @@ test('mounted sidebar: right-click opens the row menu at the pointer and its ite
   await H.flush();
   assert.deepEqual(calls(t.flows), [['fetch', { remote: 'origin' }]]);
 
-  // folders and section headers have no menu (the native one is still suppressed)
-  const folder = t.root.querySelectorAll('.sb-folder')[0];
+  // remote folders and section headers have no menu (the native one is still suppressed)
+  const folder = t.root.querySelectorAll('.sb-folder').find((r) => r.dataset.key === 'dir:remote:origin');
   assert.equal(t.dom.dispatch(folder, 'contextmenu', { clientX: 1, clientY: 1 }).defaultPrevented, true);
   t.dom.dispatch(t.root.querySelector('.sb-section-header'), 'contextmenu', { clientX: 1, clientY: 1 });
   assert.equal(t.menu.opened.length, 1);
@@ -552,6 +552,8 @@ test('mounted sidebar: ⌘/Ctrl/Alt keys on a row are left to the app shortcuts 
   r.focus();
   for (const mods of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true, shiftKey: true }]) {
     for (const k of ['Enter', 'ArrowDown', 'ArrowUp', ' ']) {
+      // ⌘/Ctrl+Space toggles the row in the multi-selection (its own test)
+      if (k === ' ' && t.win.Components.util.modKey(mods) && !mods.shiftKey) continue;
       const e = t.dom.key(k, mods, r);
       assert.equal(e.defaultPrevented, false, `${k} ${JSON.stringify(mods)}`);
       assert.equal(e.stopped, false, `${k} ${JSON.stringify(mods)} reaches the window`);
@@ -1273,4 +1275,269 @@ test('mounted commit details: Copy puts the full sha on the clipboard through wi
   assert.equal(notices.at(-1).message, 'Could not copy: The clipboard is not available');
   assert.deepEqual(written, [SHA('a')]);
   t.dispose();
+});
+
+// ------------------------------------------------------------------ multi-selection and bulk delete
+
+test('nextSelection: plain click resets to one, ⌘/Ctrl toggles, Shift selects a range from the anchor', () => {
+  const { mod: { nextSelection } } = loadComponent('sidebar.js');
+  const order = ['local:a', 'local:b', 'local:c', 'local:d'];
+  const keys = (sel) => [...sel.keys];
+  let sel = nextSelection(null, 'local:b', order);
+  assert.deepEqual([keys(sel), sel.anchor], [['local:b'], 'local:b']);
+  sel = nextSelection(sel, 'local:d', order, { toggle: true });
+  assert.deepEqual([keys(sel), sel.anchor], [['local:b', 'local:d'], 'local:d']);
+  sel = nextSelection(sel, 'local:b', order, { toggle: true });
+  assert.deepEqual([keys(sel), sel.anchor], [['local:d'], 'local:b'], 'toggled off; the anchor moves');
+  sel = nextSelection({ keys: new Set(['local:c']), anchor: 'local:c' }, 'local:a', order, { range: true });
+  assert.deepEqual([keys(sel), sel.anchor], [['local:a', 'local:b', 'local:c'], 'local:c'], 'upwards, anchor kept');
+  sel = nextSelection(sel, 'local:d', order, { range: true });
+  assert.deepEqual(keys(sel), ['local:c', 'local:d'], 'a new range from the same anchor replaces the old one');
+  sel = nextSelection(sel, 'local:d', order, { range: true, toggle: true });
+  assert.deepEqual(keys(sel), ['local:c', 'local:d'], 'Shift wins over ⌘');
+  assert.deepEqual(keys(nextSelection({ keys: new Set(), anchor: 'local:gone' }, 'local:b', order, { range: true })), ['local:b'], 'no visible anchor');
+  sel = nextSelection(sel, 'local:a', order);
+  assert.deepEqual([keys(sel), sel.anchor], [['local:a'], 'local:a'], 'plain click');
+  assert.deepEqual(keys(nextSelection(sel, 'remote:origin/a', order, { toggle: true })), [], 'not selectable: cleared');
+  sel = nextSelection(sel, 'local:a', order, { toggle: true });
+  assert.deepEqual([keys(sel), sel.anchor], [['local:a'], 'local:a'], 'toggling the only key off does nothing');
+});
+
+function bulkState(extra = {}) {
+  const local = ['chore/a', 'chore/b', 'chore/sub/c', 'feat/x'].map((name, i) => ({ name, oid: SHA('bcde'[i]), upstream: null, ahead: 0, behind: 0, gone: false, current: false }));
+  const s = sampleState(extra);
+  return { ...s, refs: { ...s.refs, local: [s.refs.local[0], ...local] } };
+}
+
+test('folderMenuItems: "Delete all N branches in <folder>/" with nested folders and the filter; none for other folders', () => {
+  const { mod: { folderMenuItems, folderBranches } } = loadComponent('sidebar.js');
+  const s = bulkState();
+  const flows = { deleteBranches: async () => true };
+  assert.deepEqual(folderBranches('dir:local:/chore', s), ['chore/a', 'chore/b', 'chore/sub/c']);
+  assert.deepEqual(folderBranches('dir:local:/chore', s, 'sub'), ['chore/sub/c']);
+  const [d] = folderMenuItems('dir:local:/chore', s, { flows });
+  assert.deepEqual(d, { label: 'Delete all 3 branches in chore/', flow: 'deleteBranches', args: [['chore/a', 'chore/b', 'chore/sub/c']], danger: true });
+  assert.equal(folderMenuItems('dir:local:/chore/sub', s, { flows })[0].label, 'Delete 1 branch in chore/sub/');
+  for (const k of ['dir:remote:origin', 'dir:tags:/v', 'local:chore/a', null]) assert.deepEqual(folderMenuItems(k, s, { flows }), [], String(k));
+  assert.equal(folderMenuItems('dir:local:/chore', { ...s, busy: true }, { flows })[0].disabled, true, 'busy');
+  const worktrees = [{ path: '/w', branch: 'chore/b', bare: false }];
+  const partly = folderMenuItems('dir:local:/chore', { ...s, worktrees }, { flows })[0];
+  assert.deepEqual([partly.label, partly.args], ['Delete 2 branches in chore/', [['chore/a', 'chore/b', 'chore/sub/c']]], 'counts what the flow deletes, without "all"');
+});
+
+test('selectionMenuItems: only "Delete N branches"; disabled when only the checked-out branch is left', () => {
+  const { mod: { selectionMenuItems } } = loadComponent('sidebar.js');
+  const s = bulkState();
+  const flows = { deleteBranches: async () => true };
+  const items = selectionMenuItems(new Set(['local:main', 'local:chore/a', 'local:feat/x']), s, flows);
+  assert.deepEqual(labels(items), ['Delete 2 branches'], 'counts what the flow deletes: main is left out');
+  assert.equal(items[0].disabled, undefined);
+  assert.deepEqual(items[0].args, [['main', 'chore/a', 'feat/x']]);
+  const cur = selectionMenuItems(new Set(['local:main']), s, flows)[0];
+  assert.equal(cur.disabled, true);
+  assert.equal(cur.title, 'The checked-out branch can’t be deleted: check out another branch first', 'deleteItem\'s reason (deleteRefusal)');
+  assert.equal(cur.label, 'Delete 1 branch', 'none deletable: the count of the selection');
+  const worktrees = [{ path: '/w', branch: 'chore/a', bare: false }];
+  const both = selectionMenuItems(new Set(['local:main', 'local:chore/a']), { ...s, worktrees }, flows)[0];
+  assert.deepEqual([both.disabled, both.title], [true, 'None of these branches can be deleted']);
+});
+
+function bulkData() {
+  const s = bulkState();
+  return H.repoData({ commits: H.chain([SHA('a'), SHA('b')]), status: { ...H.status({ oid: SHA('a') }), upstream: 'origin/main' }, refs: s.refs, stashes: s.stashes });
+}
+
+test('mounted sidebar: ⌘/Ctrl-click toggles, Shift-click selects a range, a plain click and Esc go back to one', async (tc) => {
+  const t = await mountComponent(tc, 'sidebar.js', 'sidebar', bulkData());
+  const mod = t.win.Components.util.IS_MAC ? { metaKey: true } : { ctrlKey: true };
+  const row = (key) => t.root.querySelectorAll('.sb-row').find((r) => r.dataset.key === key);
+  const selected = () => t.root.querySelectorAll('.sb-row').filter((r) => r.classList.contains('selected')).map((r) => r.dataset.key);
+  const click = (key, init) => t.dom.dispatch(row(key).querySelector('.sb-name'), 'click', init);
+  click('local:chore/a');
+  await H.flush();
+  assert.deepEqual(selected(), ['local:chore/a']);
+  click('local:feat/x', mod);
+  assert.deepEqual(selected(), ['local:chore/a', 'local:feat/x']);
+  assert.equal(row('local:feat/x').getAttribute('aria-selected'), 'true');
+  click('local:chore/sub/c', { shiftKey: true }); // visible order: chore/sub/c, chore/a, chore/b, feat/x, main
+  assert.deepEqual(selected(), ['local:chore/sub/c', 'local:chore/a', 'local:chore/b', 'local:feat/x']);
+
+  // right-click inside the selection: the reduced menu
+  t.dom.dispatch(row('local:chore/b'), 'contextmenu', { clientX: 1, clientY: 1 });
+  assert.deepEqual(labels(t.menu.opened[0].items), ['Delete 4 branches']);
+  t.menu.opened[0].items[0].action();
+  await H.flush();
+  assert.deepEqual(calls(t.flows).at(-1), ['deleteBranches', ['chore/sub/c', 'chore/a', 'chore/b', 'feat/x']]);
+
+  // Esc goes back to the one selected row
+  const esc = t.dom.key('Escape', {}, row('local:chore/b'));
+  assert.equal(esc.defaultPrevented, true);
+  assert.deepEqual(selected(), ['local:chore/a']);
+  assert.equal(t.dom.key('Escape', {}, row('local:chore/b')).defaultPrevented, false, 'nothing to clear: left alone');
+
+  // a plain click resets the selection to one
+  click('local:chore/b', mod);
+  assert.equal(selected().length, 2);
+  click('local:main');
+  await H.flush();
+  assert.deepEqual(selected(), ['local:main']);
+
+  // right-click outside the selection selects just that row and shows its normal menu
+  click('local:chore/a', mod);
+  assert.deepEqual(selected(), ['local:chore/a', 'local:main']);
+  t.dom.dispatch(row('local:feat/x'), 'contextmenu', { clientX: 1, clientY: 1 });
+  await H.flush();
+  assert.deepEqual(selected(), ['local:feat/x']);
+  assert.equal(labels(t.menu.opened.at(-1).items).at(-1), 'Delete');
+  t.dispose();
+});
+
+test('mounted sidebar: right-click on a local folder offers deleting its branches', async (tc) => {
+  const t = await mountComponent(tc, 'sidebar.js', 'sidebar', bulkData());
+  const folder = t.root.querySelectorAll('.sb-folder').find((r) => r.dataset.key === 'dir:local:/chore');
+  t.dom.dispatch(folder, 'contextmenu', { clientX: 1, clientY: 1 });
+  assert.deepEqual(labels(t.menu.opened[0].items), ['Delete all 3 branches in chore/']);
+  t.menu.opened[0].items[0].action();
+  await H.flush();
+  assert.deepEqual(calls(t.flows), [['deleteBranches', ['chore/a', 'chore/b', 'chore/sub/c']]]);
+  t.dispose();
+});
+
+/** A mounted sidebar over bulkData() with row / selection / click helpers. */
+async function bulkSidebar(tc) {
+  const t = await mountComponent(tc, 'sidebar.js', 'sidebar', bulkData());
+  const mod = t.win.Components.util.IS_MAC ? { metaKey: true } : { ctrlKey: true };
+  const row = (key) => t.root.querySelectorAll('.sb-item').find((r) => r.dataset.key === key);
+  const selected = () => t.root.querySelectorAll('.sb-row').filter((r) => r.classList.contains('selected') && r.dataset.key.startsWith('local:')).map((r) => r.dataset.key);
+  const click = (key, init) => t.dom.dispatch(row(key).querySelector('.sb-name') || row(key), 'click', init);
+  const sha = () => t.store.state.selection && t.store.state.selection.sha;
+  return { ...t, mod, row, selected, click, sha };
+}
+
+test('mounted sidebar: a commit selected in the graph ends even a one-row selection: ⌘-click / Shift-click then start afresh', async (tc) => {
+  const t = await bulkSidebar(tc);
+  t.click('local:chore/a');
+  await H.flush();
+  t.store.actions.select({ kind: 'commit', sha: SHA('a') }); // the graph
+  t.click('local:feat/x', t.mod);
+  assert.deepEqual(t.selected(), ['local:feat/x'], 'chore/a is not added back');
+  assert.equal(t.sha(), SHA('e'));
+  t.dom.dispatch(t.row('local:chore/b'), 'contextmenu', { clientX: 1, clientY: 1 });
+  assert.equal(labels(t.menu.opened.at(-1).items).at(-1), 'Delete', 'the one-branch menu');
+
+  t.click('local:chore/a');
+  t.store.actions.select({ kind: 'commit', sha: SHA('a') });
+  t.click('local:feat/x', { shiftKey: true });
+  assert.deepEqual(t.selected(), ['local:feat/x'], 'no range from the stale anchor');
+  t.click('local:chore/b', t.mod); // the sidebar's own one-row selection is kept
+  assert.deepEqual(t.selected(), ['local:chore/b', 'local:feat/x']);
+});
+
+test('mounted sidebar: ⌘-clicking the only selected row keeps it; Esc after ⌘-clicking the selected-commit row off goes to a row still selected', async (tc) => {
+  const t = await bulkSidebar(tc);
+  t.click('local:chore/a');
+  await H.flush();
+  t.click('local:chore/a', t.mod);
+  assert.deepEqual(t.selected(), ['local:chore/a']);
+  t.click('local:chore/b', t.mod);
+  assert.deepEqual(t.selected(), ['local:chore/a', 'local:chore/b'], 'still in the selection');
+  t.click('local:feat/x', t.mod);
+  t.click('local:chore/a', t.mod); // the row whose commit is selected, off
+  assert.deepEqual(t.selected(), ['local:chore/b', 'local:feat/x']);
+  assert.equal(t.dom.key('Escape', {}, t.row('local:chore/b')).defaultPrevented, true);
+  assert.deepEqual(t.selected(), ['local:feat/x'], 'not the deselected chore/a');
+  assert.equal(t.sha(), SHA('e'), 'its commit is selected');
+});
+
+test('mounted sidebar: rows that are no longer shown leave the selection (refresh, filter, folder and section collapse)', async (tc) => {
+  const t = await bulkSidebar(tc);
+  const pick = (...keys) => {
+    t.click(keys[0]);
+    for (const k of keys.slice(1)) t.click(k, t.mod);
+  };
+  pick('local:chore/a', 'local:chore/b', 'local:feat/x');
+  await H.flush();
+  // refresh: chore/b deleted
+  t.store.set({ refs: { ...t.store.state.refs, local: t.store.state.refs.local.filter((b) => b.name !== 'chore/b') } });
+  assert.deepEqual(t.selected(), ['local:chore/a', 'local:feat/x']);
+  // filter: only feat/x left -> back to the row whose commit is selected (filtered out: none)
+  const input = t.root.querySelector('.sb-filter-input');
+  input.value = 'feat';
+  t.dom.dispatch(input, 'input', {});
+  assert.deepEqual(t.selected(), []);
+  input.value = '';
+  t.dom.dispatch(input, 'input', {});
+  assert.deepEqual(t.selected(), ['local:chore/a'], 'one row, the selected commit\'s');
+  t.dom.dispatch(t.row('local:chore/a'), 'contextmenu', { clientX: 1, clientY: 1 });
+  assert.equal(labels(t.menu.opened.at(-1).items).at(-1), 'Delete');
+  // folder collapse
+  pick('local:chore/a', 'local:chore/sub/c', 'local:feat/x');
+  t.click('dir:local:/chore/sub');
+  assert.deepEqual(t.selected(), ['local:chore/a', 'local:feat/x']);
+  t.click('dir:local:/chore/sub');
+  assert.deepEqual(t.selected(), ['local:chore/a', 'local:feat/x'], 'rows shown again are not re-added');
+  // section collapse
+  t.click('section:local');
+  assert.deepEqual(t.selected(), []);
+  t.click('section:local');
+  assert.deepEqual(t.selected(), ['local:chore/a']);
+});
+
+test('mounted sidebar: opening another repository clears the multi-selection', async (tc) => {
+  const t = await bulkSidebar(tc);
+  t.click('local:chore/a');
+  t.click('local:chore/b', t.mod);
+  await H.flush();
+  const loading = t.store.actions.loadRepo({ root: '/other', name: 'other' });
+  await H.flush(1);
+  await H.answerRefresh(t.api, bulkData());
+  await loading;
+  await H.flush();
+  assert.equal(t.store.state.repo.root, '/other');
+  assert.ok(t.selected().length < 2);
+  t.click('local:feat/x', t.mod);
+  assert.deepEqual(t.selected(), ['local:feat/x']);
+});
+
+test('mounted sidebar: Shift+ArrowUp/Down extends the range over local branch rows; ⌘/Ctrl+Space toggles the focused one', async (tc) => {
+  const t = await bulkSidebar(tc);
+  t.click('local:chore/a'); // visible: chore/, chore/sub/, chore/sub/c, chore/a, chore/b, feat/, feat/x, main
+  await H.flush();
+  const shift = (key) => {
+    const e = t.dom.key(key, { shiftKey: true }, t.dom.doc.activeElement);
+    assert.equal(e.defaultPrevented, true, key);
+    assert.equal(e.stopped, true, key);
+  };
+  shift('ArrowDown');
+  assert.deepEqual(t.selected(), ['local:chore/a', 'local:chore/b']);
+  shift('ArrowDown'); // over the feat/ folder row
+  assert.deepEqual(t.selected(), ['local:chore/a', 'local:chore/b', 'local:feat/x']);
+  assert.equal(t.dom.doc.activeElement, t.row('local:feat/x'));
+  shift('ArrowUp');
+  assert.deepEqual(t.selected(), ['local:chore/a', 'local:chore/b'], 'shrinks towards the anchor');
+  shift('ArrowUp');
+  shift('ArrowUp');
+  assert.deepEqual(t.selected(), ['local:chore/sub/c', 'local:chore/a'], 'past the anchor: the other way');
+  shift('ArrowUp'); // chore/sub/c is the first local branch row
+  assert.deepEqual(t.selected(), ['local:chore/sub/c', 'local:chore/a']);
+
+  const space = (target) => t.dom.key(' ', t.mod, target);
+  assert.equal(space(t.row('local:main')).defaultPrevented, true);
+  assert.deepEqual(t.selected(), ['local:chore/sub/c', 'local:chore/a', 'local:main']);
+  space(t.row('local:chore/sub/c'));
+  assert.deepEqual(t.selected(), ['local:chore/a', 'local:main']);
+  t.dom.key('Escape', {}, t.row('local:main'));
+  assert.deepEqual(t.selected(), ['local:chore/a']);
+  space(t.row('local:chore/a'));
+  assert.deepEqual(t.selected(), ['local:chore/a'], 'the last one stays');
+
+  // on a folder row Shift+Arrow just moves the focus
+  const folder = t.row('dir:local:/feat');
+  folder.focus();
+  t.dom.key('ArrowDown', { shiftKey: true }, folder);
+  assert.equal(t.dom.doc.activeElement, t.row('local:feat/x'));
+  assert.deepEqual(t.selected(), ['local:chore/a']);
+  assert.equal(t.root.querySelector('.sb-list').getAttribute('aria-multiselectable'), 'true');
+  await H.flush();
+  assert.deepEqual(calls(t.flows), []);
 });
