@@ -9,16 +9,16 @@
     "gui",
     "desktop"
   ],
-  "homepage": "https://github.com/SilverClash/pasta-lite#readme",
+  "homepage": "https://github.com/SilverClash/pasta-lite-git-client#readme",
   "bugs": {
-    "url": "https://github.com/SilverClash/pasta-lite/issues"
+    "url": "https://github.com/SilverClash/pasta-lite-git-client/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SilverClash/pasta-lite.git"
+    "url": "git+https://github.com/SilverClash/pasta-lite-git-client.git"
   },
   "license": "Apache-2.0",
-  "author": "Alex (https://github.com/SilverClash)",
+  "author": "Alexey Zhuravlev (https://github.com/SilverClash)",
   "main": "main.js",
   "private": true,
   "scripts": {
@@ -40,7 +40,7 @@
   "build": {
     "appId": "io.github.silverclash.pastalite",
     "productName": "Pasta Lite Git client",
-    "copyright": "Copyright © 2026 Alex",
+    "copyright": "Copyright © 2026 Alexey Zhuravlev",
     "directories": {
       "output": "dist"
     },
