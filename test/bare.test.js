@@ -159,11 +159,12 @@ test('reads work in a bare repo: refs, log, commit files and diffs, stashes, rem
   assert.deepEqual(await run(bare, 'remotes'), ['origin']);
   assert.equal((await run(bare, 'lastCommitMessage')).sha, rev(bare, 'main'));
   const wts = await run(bare, 'worktrees');
+  const none = { detached: false, locked: false, lockReason: null, prunable: false, prunableReason: null };
   assert.deepEqual(wts, [
-    { path: bare, head: null, branch: null, bare: true, detached: false, locked: false, prunable: false },
-    { path: wt, head: rev(wt, 'HEAD'), branch: 'main', bare: false, detached: false, locked: false, prunable: false },
+    { path: bare, head: null, branch: null, bare: true, ...none, main: true, current: true },
+    { path: wt, head: rev(wt, 'HEAD'), branch: 'main', bare: false, ...none, main: false, current: false },
   ]);
-  assert.deepEqual(await run(wt, 'worktrees'), wts, 'the same list from the worktree');
+  assert.deepEqual(await run(wt, 'worktrees'), wts.map((w) => ({ ...w, current: !w.current })), 'the same list from the worktree, where it is current');
   assert.equal(path.dirname(bare), top);
 });
 
@@ -177,13 +178,45 @@ test('git.worktrees: detached, locked and prunable entries', async () => {
   fs.rmSync(gone, { recursive: true, force: true });
   const list = await git.worktrees(bare);
   const by = Object.fromEntries(list.map((w) => [w.path, w]));
-  assert.deepEqual(by[det], { path: det, head: rev(bare, 'main'), branch: null, bare: false, detached: true, locked: true, prunable: false });
+  assert.deepEqual(by[det], {
+    path: det, head: rev(bare, 'main'), branch: null, bare: false, detached: true,
+    locked: true, lockReason: 'on a stick', prunable: false, prunableReason: null, main: false, current: false,
+  });
   assert.equal(by[gone].prunable, true);
+  assert.equal(by[gone].prunableReason, 'gitdir file points to non-existent location');
   assert.equal(by[gone].branch, 'side');
   assert.equal(by[wt].locked, false);
   // A normal repo: one entry, its own.
   const normal = h.initRepo();
-  assert.deepEqual(await git.worktrees(normal), [{ path: normal, head: rev(normal, 'HEAD'), branch: 'main', bare: false, detached: false, locked: false, prunable: false }]);
+  assert.deepEqual(await git.worktrees(normal), [{
+    path: normal, head: rev(normal, 'HEAD'), branch: 'main', bare: false, detached: false,
+    locked: false, lockReason: null, prunable: false, prunableReason: null, main: true, current: true,
+  }]);
+});
+
+test('linked worktrees from the bare repo: lock, unlock, remove and prune work; the bare entry is main-worktree', async () => {
+  const { bare, wt } = h.bareWithWorktree();
+  const other = path.join(path.dirname(bare), 'other');
+  const gone = path.join(path.dirname(bare), 'gone');
+  h.git(bare, 'worktree', 'add', '-q', '-b', 'other', other, 'main');
+  h.git(bare, 'worktree', 'add', '-q', '-b', 'gone', gone, 'main');
+  fs.rmSync(gone, { recursive: true, force: true });
+  const { run } = runnerWithEvents();
+  for (const name of ['removeWorktree', 'lockWorktree', 'unlockWorktree']) {
+    await assert.rejects(run(bare, name, bare), { kind: 'main-worktree' }, name);
+  }
+  // From the worktree too: the bare entry is the main one.
+  await assert.rejects(run(wt, 'removeWorktree', bare), { kind: 'main-worktree' });
+  await run(bare, 'lockWorktree', other, { reason: 'busy' });
+  await assert.rejects(run(bare, 'removeWorktree', other), { kind: 'worktree-locked', reason: 'busy' });
+  await run(bare, 'unlockWorktree', other);
+  assert.deepEqual(await run(bare, 'removeWorktree', other), { path: other });
+  assert.equal(fs.existsSync(other), false);
+  assert.deepEqual((await run(bare, 'worktreePrunePreview')).entries.map((e) => e.id), ['worktrees/gone']);
+  assert.deepEqual((await run(bare, 'pruneWorktrees')).entries.map((e) => e.id), ['worktrees/gone']);
+  assert.deepEqual((await run(bare, 'worktrees')).map((w) => w.path), [bare, wt]);
+  assert.deepEqual(await run(bare, 'worktreeDirty'), [{ path: wt, dirty: false }], 'the bare entry is never checked');
+  assert.equal(h.git(bare, 'branch', '--list', 'other').trim(), 'other', 'the branch is kept');
 });
 
 test('createBranch (no checkout) and deleteBranch work in a bare repo; undo recreates the branch, redo deletes it again', async () => {

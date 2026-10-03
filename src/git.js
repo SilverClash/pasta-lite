@@ -1,6 +1,7 @@
 'use strict';
 // High-level git operations, and the facade of the git layer: reads (refs, history, diffs),
-// the index and worktree (stage, discard, commit), branches (checkout, create, delete), plus
+// the index and worktree (stage, discard, commit), branches (checkout, create, delete), linked
+// worktrees (list, remove, prune, lock / unlock, the batched dirty check), plus
 // re-exports of the modules below it (status, pull, remote, hooks, git-reads, stash), so main.js
 // and ops use one module. Every function takes a path inside the repo as `cwd` first and shells
 // out through exec.run/out, which always run at the worktree root: paths passed in and returned
@@ -8,7 +9,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  GitError, kindError, tagError, run, out, tryOut, nulList, argvChunks, LITERAL_ENV,
+  GitError, kindError, tagError, run, out, tryOut, nulList, argvChunks, LITERAL_ENV, forgetRoot,
 } = require('./exec');
 const { resolveRoot, bareGitDir, isBare, headState } = require('./repo-dirs');
 const {
@@ -123,14 +124,125 @@ async function riskyHooks(cwd) {
 }
 
 /**
+ * `p` with every symlink resolved (fs.realpathSync.native), or path.resolve(p) when it can't be
+ * (a missing folder): how worktree paths are compared, since git may print /var/... for what
+ * the app opened as /private/var/... (macOS) or the other way round.
+ */
+function realPath(p) {
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/**
  * The repository's worktrees (`git worktree list --porcelain -z`), main one first:
- * [{path, head, branch, bare, detached, locked, prunable}]. `path` absolute as git prints it;
- * `head` the checked-out commit (null for the bare entry or an unborn branch); `branch` the short
- * name (null when detached or bare); locked / prunable: booleans (git's reasons are left out).
- * Works in a bare repo (its own entry is the one with bare: true) and in any worktree.
+ * [{path, head, branch, bare, detached, locked, lockReason, prunable, prunableReason, main,
+ * current}]. `path` absolute as git prints it; `head` the checked-out commit (null for the bare
+ * entry or an unborn branch); `branch` the short name (null when detached or bare); locked /
+ * prunable: booleans, with git's reasons (null when none). `main`: the first entry (the main
+ * worktree, or a bare repo's own entry). `current`: the worktree `cwd` is in (its root, through
+ * realPath; for a bare repo, cwd is its git dir, the bare entry's path), so the renderer never
+ * compares paths. Works in a bare repo (its own entry is the one with bare: true) and in any
+ * worktree.
  */
 async function worktrees(cwd) {
-  return parseWorktrees(await out(cwd, ['worktree', 'list', '--porcelain', '-z']));
+  const [raw, here] = await Promise.all([
+    out(cwd, ['worktree', 'list', '--porcelain', '-z']),
+    resolveRoot(cwd).then(realPath),
+  ]);
+  return parseWorktrees(raw).map((w, i) => ({ ...w, main: i === 0, current: realPath(w.path) === here }));
+}
+
+/**
+ * `git worktree remove [--force] -- <wtPath>`: deletes the linked worktree's folder and git's
+ * record of it. Never `-f -f`: a locked worktree is refused even with force (the user unlocks
+ * it first). Kinds: 'worktree-dirty' (modified or untracked files; `submodules: true` when it
+ * has submodules, which git only removes with force), 'worktree-locked', 'main-worktree',
+ * 'not-found' (not a worktree). Resolves {path}.
+ */
+async function removeWorktree(cwd, wtPath, { force = false } = {}) {
+  try {
+    await run(cwd, ['worktree', 'remove', ...(force ? ['--force'] : []), '--', wtPath]);
+  } catch (err) {
+    const extra = /submodules/.test(String(err.stderr || '')) ? { submodules: true } : {};
+    throw gitErrors.classify(err, ['worktreeDirty', 'worktreeLocked', 'mainWorktree', 'notAWorktree'], extra);
+  }
+  forgetRoot(wtPath); // its folder is gone: a later command there must not reuse the cached root
+  return { path: wtPath };
+}
+
+const PRUNED = /^Removing (worktrees\/[^:]+): (.*)$/;
+
+/**
+ * `git worktree prune -v` (dryRun: `-n`, nothing is removed): forgets the worktrees whose folder
+ * is gone; git keeps locked ones. Resolves {entries: [{id, reason}]}: `id` the admin folder
+ * ('worktrees/<name>'), `reason` git's (e.g. "gitdir file points to non-existent location").
+ * git 2.51 prints these lines on stderr; both streams are read.
+ */
+async function pruneWorktrees(cwd, { dryRun = false } = {}) {
+  const { stdout, stderr } = await run(cwd, ['worktree', 'prune', ...(dryRun ? ['-n'] : []), '-v']);
+  const entries = [];
+  for (const line of `${stderr}\n${stdout}`.split('\n')) {
+    const m = PRUNED.exec(line);
+    if (m) entries.push({ id: m[1], reason: m[2] });
+  }
+  return { entries };
+}
+
+/** `git worktree lock [--reason=<reason>] -- <wtPath>`. Kind 'main-worktree'. Resolves {path}. */
+async function lockWorktree(cwd, wtPath, { reason } = {}) {
+  try {
+    await run(cwd, ['worktree', 'lock', ...(reason ? [`--reason=${reason}`] : []), '--', wtPath]);
+  } catch (err) {
+    throw gitErrors.classify(err, ['mainWorktree']);
+  }
+  return { path: wtPath };
+}
+
+/** `git worktree unlock -- <wtPath>`. Kind 'main-worktree'. Resolves {path}. */
+async function unlockWorktree(cwd, wtPath) {
+  try {
+    await run(cwd, ['worktree', 'unlock', '--', wtPath]);
+  } catch (err) {
+    throw gitErrors.classify(err, ['mainWorktree']);
+  }
+  return { path: wtPath };
+}
+
+/**
+ * Whether each linked worktree has local changes, in one call: [{path, dirty}] for every entry of
+ * a fresh list that is not bare, not prunable and not the current one (the caller has its own
+ * status). `dirty`: `status --porcelain=v1 -z --untracked-files=normal` printed anything
+ * (untracked files count); null when it failed, ran past `timeout` ms, the folder is not that
+ * worktree's root any more, or the entry is beyond the first `max`. At most `concurrency` run at
+ * once. Never rejects (a failed list gives []).
+ */
+async function worktreesDirty(cwd, { concurrency = 4, timeout = 8000, max = 50 } = {}) {
+  let list;
+  try {
+    list = await worktrees(cwd);
+  } catch {
+    return [];
+  }
+  const todo = list.filter((w) => !w.bare && !w.prunable && !w.current);
+  const res = todo.map((w) => ({ path: w.path, dirty: null }));
+  const checked = Math.min(todo.length, max);
+  const check = async (w) => {
+    // A folder whose .git file is broken would run status in the repo around it.
+    if (realPath(await resolveRoot(w.path)) !== realPath(w.path)) return null;
+    return (await out(w.path, ['status', '--porcelain=v1', '-z', '--untracked-files=normal'], { timeout })) !== '';
+  };
+  let next = 0;
+  const worker = async () => {
+    while (next < checked) {
+      const i = next++;
+      res[i].dirty = await check(todo[i]).catch(() => null);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, checked) }, worker));
+  return res;
 }
 
 /** Split 'origin/feature/x' into remote + branch, preferring the longest known remote name. */
@@ -504,7 +616,8 @@ async function removeBranch(cwd, { name, sha, upstream }, { force = false } = {}
 module.exports = {
   OID, REFSPEC_SAFE, splitN, trimTrailingNewlines,
   validateBranchName, isUntracked,
-  root, bareGitDir, isBare, riskyLocalConfig, riskyHooks, worktrees, refs, log,
+  root, bareGitDir, isBare, riskyLocalConfig, riskyHooks, refs, log,
+  realPath, worktrees, removeWorktree, pruneWorktrees, lockWorktree, unlockWorktree, worktreesDirty,
   commitFiles, diffCommitFile, diffWorkdir,
   stage, stageAll, unstage, unstageAll, discard, argvChunks,
   commit, lastCommit, commitInfo, commitError,

@@ -27,13 +27,14 @@ async function waitForFile(file, what, ms = 60000) {
 }
 
 test('registry has exactly the documented operations', () => {
-  const reads = ['status', 'refs', 'log', 'stashes', 'commitDiffView', 'workdirDiffView', 'commitFiles', 'diffCommitFile', 'diffWorkdir', 'undoState', 'remotes', 'lastCommitMessage', 'rebasePlan', 'worktrees'];
+  const reads = ['status', 'refs', 'log', 'stashes', 'commitDiffView', 'workdirDiffView', 'commitFiles', 'diffCommitFile', 'diffWorkdir', 'undoState', 'remotes', 'lastCommitMessage', 'rebasePlan', 'worktrees', 'worktreeDirty', 'worktreePrunePreview'];
   const writes = [
     'stage', 'stageAll', 'unstage', 'unstageAll', 'stageSelection', 'unstageSelection', 'discardSelection', 'discard',
     'commit', 'commitAll', 'fetch', 'pull', 'push', 'setUpstream', 'checkout', 'createBranch', 'deleteBranch', 'deleteBranches',
     'stashPush', 'stashApply', 'stashPop', 'stashDrop', 'undo', 'redo',
     'rebaseContinue', 'rebaseSkip', 'rebaseAbort', 'restoreAutostash', 'mergeCommit', 'mergeAbort',
     'merge', 'rebase', 'resolveWith', 'markAllResolved', 'rebaseInteractive',
+    'removeWorktree', 'pruneWorktrees', 'lockWorktree', 'unlockWorktree',
   ];
   assert.deepEqual(Object.keys(ops.OPS).sort(), [...reads, ...writes].sort());
   assert.deepEqual([...ops.WRITE_OPS].sort(), [...writes].sort());
@@ -1362,4 +1363,95 @@ test('cancelAll() cancels every queued and running op; an op that ignores its si
   assert.equal(stuckRan, false);
   await fake.settled();
   assert.deepEqual(fake.running(), []);
+});
+
+// ---------------------------------------------------------------- linked worktrees
+
+/** A repo with linked worktrees `names` in one folder next to it; returns {dir, parent, wts: {name: path}}. */
+function withWorktrees(...names) {
+  const dir = h.initRepo();
+  const parent = h.tmpDir();
+  const wts = {};
+  for (const n of names) {
+    wts[n] = path.join(parent, n);
+    h.git(dir, 'worktree', 'add', '-q', '-b', n, wts[n]);
+  }
+  return { dir, parent, wts };
+}
+
+test('worktree ops refuse before anything runs: unlisted, main, current, containing the tab, locked, prunable, a bad reason', async () => {
+  const { dir, parent, wts } = withWorktrees('a', 'l', 'gone');
+  // A worktree inside a's folder: a tab there has a's folder around it.
+  const inner = path.join(wts.a, 'inner');
+  h.git(dir, 'worktree', 'add', '-q', '-b', 'inner', inner);
+  h.git(dir, 'worktree', 'lock', '--reason', 'on a stick', wts.l);
+  fs.rmSync(wts.gone, { recursive: true, force: true });
+  const runner = ops.createRunner();
+  const events = [];
+  runner.on('changed', (e) => events.push(e));
+  const refused = (repo, name, args, kind, message) => assert.rejects(runner.run(repo, name, args), (e) => {
+    assert.equal(e.kind, kind, `${name} ${JSON.stringify(args)}`);
+    if (message) assert.equal(e.message, message);
+    return true;
+  });
+  for (const name of ['removeWorktree', 'lockWorktree', 'unlockWorktree']) {
+    await refused(dir, name, [path.join(parent, 'nowhere')], 'not-found', `Not a worktree of this repository: '${path.join(parent, 'nowhere')}'`);
+    await refused(dir, name, [`${wts.a}/`], 'not-found'); // exactly as git prints it: no trailing slash
+    await refused(dir, name, [`${wts.a}/../a`], 'not-found'); // another spelling of a listed path
+    await refused(dir, name, [''], 'invalid-args');
+    await refused(dir, name, [42], 'invalid-args');
+  }
+  await refused(dir, 'removeWorktree', [dir], 'main-worktree', "The main worktree can't be deleted");
+  await refused(dir, 'lockWorktree', [dir], 'main-worktree', "The main worktree can't be locked");
+  await refused(dir, 'unlockWorktree', [dir], 'main-worktree', "The main worktree can't be unlocked");
+  await refused(wts.a, 'removeWorktree', [dir], 'main-worktree', "The main worktree can't be deleted");
+  await refused(wts.a, 'removeWorktree', [wts.a], 'current-worktree', "This tab has this worktree open: it can't be deleted from here");
+  await refused(inner, 'removeWorktree', [wts.a], 'current-worktree', "This tab has this worktree open (or one inside it): it can't be deleted from here");
+  await refused(dir, 'removeWorktree', [wts.l, { force: true }], 'worktree-locked', `${wts.l} is locked: on a stick. Unlock it first`);
+  await assert.rejects(runner.run(dir, 'removeWorktree', [wts.l]), (e) => {
+    assert.deepEqual(ops.serializeError(e), { message: e.message, kind: 'worktree-locked', exitCode: null, reason: 'on a stick' });
+    return true;
+  });
+  const dirty = Object.assign(new GitError(['worktree'], 128, 'fatal: working trees containing submodules cannot be moved or removed'), { kind: 'worktree-dirty', submodules: true });
+  assert.equal(ops.serializeError(dirty).submodules, true, 'crosses IPC for the force confirm');
+  await refused(dir, 'removeWorktree', [wts.gone], 'not-found', 'Its folder is gone: prune it instead');
+  for (const reason of ['x'.repeat(201), 'two\nlines', 'tab\there', 7, { r: 1 }]) {
+    await refused(dir, 'lockWorktree', [wts.a, { reason }], 'invalid-args', 'reason must be one line of at most 200 characters');
+  }
+  await refused(dir, 'lockWorktree', [wts.l], 'nothing', 'This worktree is already locked');
+  await refused(dir, 'unlockWorktree', [wts.a], 'nothing', 'This worktree is not locked');
+  assert.deepEqual(events, [], 'refused during validation: no changed events');
+  assert.equal(fs.existsSync(wts.a) && fs.existsSync(wts.l), true);
+  assert.equal(h.git(dir, 'worktree', 'list', '--porcelain').includes('prunable'), true, 'the prunable entry is still listed');
+});
+
+test('worktree ops: lock (reason trimmed; the current one may be locked), unlock, remove with force, prune and its preview', async () => {
+  const { dir, wts } = withWorktrees('a', 'b', 'gone');
+  const runner = ops.createRunner();
+  const events = [];
+  runner.on('changed', (e) => events.push(e.op));
+  const entry = async (p) => (await runner.run(dir, 'worktrees', [])).find((w) => w.path === p);
+  assert.deepEqual(await runner.run(dir, 'lockWorktree', [wts.a, { reason: '  on a stick  ' }]), { path: wts.a });
+  assert.equal((await entry(wts.a)).lockReason, 'on a stick');
+  await runner.run(dir, 'unlockWorktree', [wts.a]);
+  await runner.run(dir, 'lockWorktree', [wts.a, { reason: '   ' }]);
+  assert.deepEqual([(await entry(wts.a)).locked, (await entry(wts.a)).lockReason], [true, null], 'a blank reason is none');
+  await runner.run(wts.a, 'unlockWorktree', [wts.a]); // the current worktree: allowed
+  await runner.run(wts.a, 'lockWorktree', [wts.a]);
+  await runner.run(dir, 'unlockWorktree', [wts.a]);
+  // Remove: dirty needs force (git's refusal, after the check passed).
+  h.write(wts.b, 'new.txt', 'n\n');
+  await assert.rejects(runner.run(dir, 'removeWorktree', [wts.b]), { kind: 'worktree-dirty' });
+  assert.deepEqual(await runner.run(dir, 'removeWorktree', [wts.b, { force: true }]), { path: wts.b });
+  assert.equal(fs.existsSync(wts.b), false);
+  // The dirty check and the prune preview are reads.
+  h.write(wts.a, 'README.md', 'changed\n');
+  fs.rmSync(wts.gone, { recursive: true, force: true });
+  assert.deepEqual(await runner.run(dir, 'worktreeDirty', []), [{ path: wts.a, dirty: true }]);
+  const preview = await runner.run(dir, 'worktreePrunePreview', []);
+  assert.deepEqual(preview.entries.map((e) => e.id), ['worktrees/gone']);
+  assert.ok(await entry(wts.gone), 'the preview removed nothing');
+  assert.deepEqual(await runner.run(dir, 'pruneWorktrees', [{ dryRun: true }]), preview, 'prune takes no arguments: never a dry run from the renderer');
+  assert.equal(await entry(wts.gone), undefined);
+  assert.deepEqual(events, ['lockWorktree', 'unlockWorktree', 'lockWorktree', 'unlockWorktree', 'lockWorktree', 'unlockWorktree', 'removeWorktree', 'removeWorktree', 'pruneWorktrees']);
 });

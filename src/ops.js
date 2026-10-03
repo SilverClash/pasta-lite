@@ -11,6 +11,11 @@
 // a time (reads don't queue), 'busy' / 'changed' events for the watcher, cancellation by op id,
 // and the bare-repository gate (src/bare-gate.js). The argument checks are src/op-validators.js,
 // the display model of diffs src/diff-view.js, the IPC error shape src/ipc-errors.js.
+//
+// Linked worktrees (remove, lock, unlock) are named by the path git prints for them: each check
+// re-reads `git worktree list` and takes only an entry whose path is exactly that string, so the
+// renderer can never point git at an arbitrary folder.
+const path = require('node:path');
 const git = require('./git');
 const hunks = require('./hunks');
 const undo = require('./undo');
@@ -134,8 +139,19 @@ const READ = {
   // `interactive: true` (R3): also refused with the plan's interactiveRefusal kind
   // (merge-commits, root-commit, too-many, nothing), the plan attached as `plan`.
   rebasePlan: read(rebasePlan),
-  /** The repository's worktrees (git.worktrees: [{path, head, branch, bare, detached, locked, prunable}]). */
+  /**
+   * The repository's worktrees (git.worktrees: [{path, head, branch, bare, detached, locked,
+   * lockReason, prunable, prunableReason, main, current}], main one first; `current` is the
+   * tab's own, decided here so the renderer never compares paths).
+   */
   worktrees: read((repo) => git.worktrees(repo), { bare: true }),
+  /**
+   * [{path, dirty: true|false|null}] for every linked worktree but the bare, prunable and current
+   * entries (git.worktreesDirty: 4 at a time, 8 s each, at most 50; null = unknown). Never rejects.
+   */
+  worktreeDirty: read((repo) => git.worktreesDirty(repo), { bare: true }),
+  /** {entries: [{id, reason}]}: what pruneWorktrees would remove (`worktree prune -n -v`), nothing changed. */
+  worktreePrunePreview: read((repo) => git.pruneWorktrees(repo, { dryRun: true }), { bare: true }),
 };
 
 /** checkout's [ref, {kind}] from the renderer's (target, kind): an existing branch, remote branch or commit. */
@@ -217,6 +233,48 @@ async function guardedDiscard(repo, paths, fn, signal) {
   } finally {
     if (signal) signal.removeEventListener('abort', onAbort);
   }
+}
+
+// ---------------------------------------------------------------- linked worktrees
+
+const LOCK_REASON_MAX = 200;
+
+/** The entry of a fresh `git worktree list` whose path is exactly `p` (as git prints it), else kind 'not-found'. */
+async function listedWorktree(repo, p) {
+  const wtPath = str(p, 'path');
+  const w = (await git.worktrees(repo)).find((e) => e.path === wtPath);
+  if (!w) throw kindError('not-found', `Not a worktree of this repository: '${wtPath}'`);
+  return w;
+}
+
+/** Refuse the main worktree or a bare repo's own entry (kind 'main-worktree'): it can't be `what`. */
+function notMain(w, what) {
+  if (w.main || w.bare) throw kindError('main-worktree', `The main worktree can't be ${what}`);
+}
+
+/**
+ * Refuse the main / bare entry ('main-worktree') and the tab's own or one containing it
+ * ('current-worktree'): `repo` (the tab's root) is the entry's folder or inside it, compared
+ * through git.realPath.
+ */
+function notMainOrCurrent(repo, w, what) {
+  notMain(w, what);
+  const here = git.realPath(repo);
+  const there = git.realPath(w.path);
+  const nested = here.startsWith(there + path.sep);
+  if (w.current || here === there || nested) {
+    throw kindError('current-worktree', `This tab has this worktree open${nested ? ' (or one inside it)' : ''}: it can't be ${what} from here`);
+  }
+}
+
+/** A lock reason: trimmed, one line of at most LOCK_REASON_MAX characters; empty or absent = undefined. */
+function lockReasonArg(v) {
+  if (v === undefined || v === null) return undefined;
+  const bad = () => invalid(`reason must be one line of at most ${LOCK_REASON_MAX} characters`);
+  if (typeof v !== 'string') throw bad();
+  const r = v.trim();
+  if (r.length > LOCK_REASON_MAX || /\p{Cc}/u.test(r)) throw bad();
+  return r || undefined;
 }
 
 const WRITE = {
@@ -431,6 +489,43 @@ const WRITE = {
   // re-apply needs a clean tree).
   mergeCommit: write(op(rebaseChecks.mergeCommit, (repo, o) => merge.mergeCommit(repo, o))),
   mergeAbort: write(op(rebaseChecks.mergeAbort, (repo) => merge.mergeAbort(repo))),
+
+  // ---- linked worktrees. `path`: exactly as the worktrees op lists it (listedWorktree; else
+  // not-found). All work from a bare repo. Refused in check: main-worktree (the main worktree or
+  // the bare entry), and for remove also current-worktree (the tab's own, or one containing the
+  // tab's root).
+  // removeWorktree(path, {force?}) -> {path}. Also refused: worktree-locked (`reason`; never
+  // `-f -f`: unlock first), not-found for a prunable entry (its folder is gone: prune it). git
+  // refuses worktree-dirty (`submodules`) without force.
+  removeWorktree: write(op(async (repo, p, o) => {
+    const force = bool(opts(o).force);
+    const w = await listedWorktree(repo, p);
+    notMainOrCurrent(repo, w, 'deleted');
+    if (w.locked) {
+      throw kindError('worktree-locked', `${w.path} is locked${w.lockReason ? `: ${w.lockReason}` : ''}. Unlock it first`, { reason: w.lockReason });
+    }
+    if (w.prunable) throw kindError('not-found', 'Its folder is gone: prune it instead');
+    return [w.path, { force }];
+  }, (repo, p, o) => git.removeWorktree(repo, p, o)), { bare: true }),
+  // pruneWorktrees() -> {entries: [{id, reason}]}: forgets the worktrees whose folder is gone (git
+  // keeps locked ones). Takes no path.
+  pruneWorktrees: write((repo) => git.pruneWorktrees(repo), { bare: true }),
+  // lockWorktree(path, {reason?}) -> {path}; the current worktree may be locked. Also refused:
+  // invalid-args (reason not one line of at most 200 characters), nothing (already locked).
+  lockWorktree: write(op(async (repo, p, o) => {
+    const reason = lockReasonArg(opts(o).reason);
+    const w = await listedWorktree(repo, p);
+    notMain(w, 'locked');
+    if (w.locked) throw kindError('nothing', 'This worktree is already locked');
+    return [w.path, { reason }];
+  }, (repo, p, o) => git.lockWorktree(repo, p, o)), { bare: true }),
+  // unlockWorktree(path) -> {path}. Also refused: nothing (not locked).
+  unlockWorktree: write(op(async (repo, p) => {
+    const w = await listedWorktree(repo, p);
+    notMain(w, 'unlocked');
+    if (!w.locked) throw kindError('nothing', 'This worktree is not locked');
+    return [w.path];
+  }, (repo, p) => git.unlockWorktree(repo, p)), { bare: true }),
 };
 
 /** Every op's descriptor, by name (see describe). */
@@ -449,7 +544,8 @@ const WRITE_OPS = new Set(names((d) => d.write));
 // repo exits 0 showing every file deleted (there is no index), and a rebase plan is only good for
 // a rebase. A test checks every op is in exactly one of the two sets.
 const WORKTREE_OPS = Object.freeze(new Set(names((d) => !d.bare)));
-// Ops that work in a bare repository: refs and history only, or remotes. `status` resolves the
+// Ops that work in a bare repository: refs and history only, remotes, or linked worktrees (git's
+// records of them and their own folders, never a tree of the bare repo). `status` resolves the
 // synthetic clean status (status.bareStatus); undo / redo / undoState offer only a branch delete
 // (src/undo.js). Two of them are refused for some arguments (BARE_ARGS): pull in any mode but
 // 'fetch', createBranch with checkout: true. fetch, pull and createBranch are refused in a mirror.
