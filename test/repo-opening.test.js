@@ -5,7 +5,7 @@
 const test = require('node:test');
 const { describe } = test;
 const assert = require('node:assert/strict');
-const { createRepoOpening, shouldForgetRecent, findShownRecent, openableWorktree } = require('../src/repo-opening');
+const { createRepoOpening, shouldForgetRecent, findShownRecent, openableWorktree, revealableWorktree } = require('../src/repo-opening');
 const { createRecentView } = require('../src/recent-view');
 const { createTabRegistry } = require('../src/tabs');
 const { createTabSession } = require('../src/tab-session');
@@ -47,6 +47,15 @@ describe('app:openWorktree helpers', () => {
     assert.equal(openableWorktree(list, '/w/main/'), null, 'compared as git prints it');
     for (const bad of ['', null, undefined, 42, ['/w/main'], { path: '/w/main' }]) assert.equal(openableWorktree(list, bad), null, String(bad));
     assert.equal(openableWorktree(null, '/w/main'), null);
+  });
+  test('revealableWorktree: a listed, non-prunable path, the bare entry included', () => {
+    assert.equal(revealableWorktree(list, '/w/main'), list[1]);
+    assert.equal(revealableWorktree(list, '/w/.bare'), list[0], 'the bare entry is a real folder');
+    assert.equal(revealableWorktree(list, '/w/gone'), null, 'prunable: its folder is gone');
+    assert.equal(revealableWorktree(list, '/etc'), null, 'unlisted');
+    assert.equal(revealableWorktree(list, '/w/main/'), null, 'compared as git prints it');
+    for (const bad of ['', null, undefined, 42, ['/w/main'], { path: '/w/main' }]) assert.equal(revealableWorktree(list, bad), null, String(bad));
+    assert.equal(revealableWorktree(null, '/w/main'), null);
   });
 });
 

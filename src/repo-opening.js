@@ -6,7 +6,7 @@
 // Security boundary: the pages never give a path to open. Every use case below takes either a
 // path from outside the pages (CLI, dock, the folder dialog, main's own menu, tabs.json) or a
 // path matched against a list main holds: the recent list it last showed (findShownRecent) or
-// `git worktree list` of the tab's repo, read just now (openableWorktree).
+// `git worktree list` of the tab's repo, read just now (openableWorktree, revealableWorktree).
 const { pickOpenTarget } = require('./tabs');
 const { kindError } = require('./exec');
 const { EVENTS } = require('./ipc-contract');
@@ -33,6 +33,17 @@ function findShownRecent(shown, root) {
 function openableWorktree(list, wtPath) {
   if (typeof wtPath !== 'string' || !wtPath || !Array.isArray(list)) return null;
   return list.find((w) => w && w.path === wtPath && !w.bare && !w.prunable) || null;
+}
+
+/**
+ * The entry of `list` (read just now) that app:revealWorktree may show in the file manager for the
+ * renderer-supplied `wtPath`, or null: only a listed path, never a prunable one (its folder is
+ * gone). Unlike openableWorktree, the bare repo's own entry is allowed: its folder is real and
+ * revealing it opens nothing. Compared as git prints it: never an arbitrary path.
+ */
+function revealableWorktree(list, wtPath) {
+  if (typeof wtPath !== 'string' || !wtPath || !Array.isArray(list)) return null;
+  return list.find((w) => w && w.path === wtPath && !w.prunable) || null;
 }
 
 /**
@@ -181,4 +192,4 @@ function createRepoOpening({
   };
 }
 
-module.exports = { createRepoOpening, shouldForgetRecent, findShownRecent, openableWorktree };
+module.exports = { createRepoOpening, shouldForgetRecent, findShownRecent, openableWorktree, revealableWorktree };
