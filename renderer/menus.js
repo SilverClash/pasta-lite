@@ -18,8 +18,13 @@
 //   commitItems(hash, state, flows?) -> finished descriptors of a graph commit row: check out the commit,
 //                                   create a branch there, commitOpItems, check out each local branch at it
 //   stashMenuItems(entry, state, flows?) -> finished Apply / Pop / Drop of a stash (git.stashes() item)
-//   checkoutItem({target, kind, label?, title?, current?}) -> the one checkout descriptor (current:
-//                                   disabled, "Already checked out"); createHere(ref) -> "Create branch here…"
+//   checkoutItem({target, kind, label?, title?, current?, state?}) -> the one checkout descriptor (current:
+//                                   disabled, "Already checked out"; with state, a branch checked out in
+//                                   another worktree: disabled with checkoutRefusal's title)
+//   checkoutRefusal(name, state, {kind?}) -> {title} | null   "Checked out in worktree <path>" when another
+//                                   worktree (state.worktrees, not the current one) has the branch (a remote
+//                                   branch: its local one); the checkout double-clicks check it too
+//   createHere(ref) -> "Create branch here…"
 //   upstreamTarget(state, name), behindOf(state, name), deleteItem(ref, state), fullRef(kind, name)
 //   deleteRefusal(name, state, {current?}) -> {why, title} | null   why a local branch can't be deleted
 //                                   (deleteItem, deletableBranches and the delete flows)
@@ -49,10 +54,45 @@
   /** Gate, then finish (busy, missing flow: Components.actions.finishItems). */
   const finish = (descs, state, flows) => C.actions.finishItems(gateItems(descs, state), state, flows);
 
-  /** The checkout descriptor: of a local / remote branch (name) or a commit (full sha); `current`: already there. */
-  function checkoutItem({ target, kind, label = 'Checkout', title, current = false }) {
+  /**
+   * The checkout descriptor: of a local / remote branch (name) or a commit (full sha); `current`:
+   * already there. With `state` (store state), a branch checked out in another worktree is disabled
+   * with checkoutRefusal's reason.
+   */
+  function checkoutItem({ target, kind, label = 'Checkout', title, current = false, state = null }) {
     const d = { label, flow: 'checkout', args: [{ target, kind }], ...(title ? { title } : {}) };
-    return current ? { ...d, disabled: true, title: 'Already checked out' } : d;
+    if (current) return { ...d, disabled: true, title: 'Already checked out' };
+    const no = state ? checkoutRefusal(target, state, { kind }) : null;
+    return no ? { ...d, disabled: true, title: no.title } : d;
+  }
+
+  /**
+   * The state.worktrees entry (kept by the store for every repository) of another worktree that has
+   * local branch `name` checked out, or null: never the bare entry, nor this tab's own worktree
+   * (current: decided in main), whose branch is the checked-out one. deleteRefusal and
+   * checkoutRefusal share it.
+   */
+  function worktreeHolding(name, state) {
+    const list = state && Array.isArray(state.worktrees) ? state.worktrees : [];
+    return list.find((w) => w && !w.bare && !w.current && w.branch === name) || null;
+  }
+
+  /**
+   * Why branch `name` can't be checked out here, or null: {title} 'Checked out in worktree <path>'
+   * (display-safe) when another worktree has it (git refuses: kind 'checked-out-elsewhere' stays
+   * the backstop when state.worktrees is stale). kind 'remote' ('origin/x'): its local branch
+   * ('x', which the checkout would switch to) is checked; a commit never is. Used by checkoutItem
+   * (the menus, the branch switcher) and the double-clicks (sidebar rows, graph ref pills).
+   */
+  function checkoutRefusal(name, state, { kind = 'local' } = {}) {
+    if (typeof name !== 'string' || !name || kind === 'commit') return null;
+    let branch = name;
+    if (kind === 'remote') {
+      const r = ((state && state.refs && state.refs.remote) || []).find((x) => x.name === name);
+      branch = r && r.branch ? r.branch : name.slice(name.indexOf('/') + 1);
+    }
+    const wt = worktreeHolding(branch, state);
+    return wt ? { title: `Checked out in worktree ${displayName(wt.path)}` } : null;
   }
 
 
@@ -186,7 +226,7 @@
       if (!ref.current) ops = [mergeItem(t, state), rebaseItem(t, state), interactiveItem(t, state), { separator: true }];
       else if (up) ops = [gone(rebaseItem(up, state)), gone(interactiveItem(up, state)), { separator: true }];
       return [
-        checkoutItem({ target: ref.name, kind: 'local', current: ref.current }),
+        checkoutItem({ target: ref.name, kind: 'local', current: ref.current, state }),
         { label: 'Push', flow: 'push', args: [ref.current ? {} : { branch: ref.name }] },
         createHere(ref),
         ...(flows && typeof flows.setUpstream === 'function' ? [{ label: 'Set upstream…', flow: 'setUpstream', args: [ref.name] }] : []),
@@ -198,7 +238,7 @@
     remote(ref, state) {
       const t = { arg: fullRef('remote', ref.name), oid: ref.oid, label: displayName(ref.name) };
       return [
-        checkoutItem({ target: ref.name, kind: 'remote' }),
+        checkoutItem({ target: ref.name, kind: 'remote', state }),
         createHere(ref),
         ...(ref.remote ? [{ label: `Fetch ${displayName(ref.remote)}`, flow: 'fetch', args: [{ remote: ref.remote }] }] : []),
         { separator: true },
@@ -238,7 +278,7 @@
         ? { why: 'HEAD of the bare repository', title: 'HEAD of the bare repository points at this branch: it can’t be deleted' }
         : { why: 'checked out', title: 'The checked-out branch can’t be deleted: check out another branch first' };
     }
-    const wt = (Array.isArray(s.worktrees) ? s.worktrees : []).find((w) => w && !w.bare && w.branch === name);
+    const wt = worktreeHolding(name, s);
     if (!wt) return null;
     const why = `checked out in the worktree ${displayName(wt.path)}`;
     return { why, title: `${displayName(name)} is ${why}: it can’t be deleted` };
@@ -325,7 +365,7 @@
     if (ops.length) items.push({ separator: true }, ...ops);
     const locals = ((state && state.refsBySha && state.refsBySha.get(hash)) || []).filter((r) => r.type === 'local');
     if (locals.length) items.push({ separator: true });
-    for (const r of locals) items.push(checkoutItem({ target: r.name, kind: 'local', label: `Checkout ${displayName(r.name)}`, current: r.current }));
+    for (const r of locals) items.push(checkoutItem({ target: r.name, kind: 'local', label: `Checkout ${displayName(r.name)}`, current: r.current, state }));
     return finish(items, state, flows);
   }
 
@@ -407,7 +447,7 @@
 
   const api = {
     worktreeRefusal, worktreeMenuItems,
-    refMenuItems, commitOpItems, commitItems, stashMenuItems, checkoutItem, createHere, upstreamTarget, behindOf, deleteItem, fullRef,
+    refMenuItems, commitOpItems, commitItems, stashMenuItems, checkoutItem, checkoutRefusal, createHere, upstreamTarget, behindOf, deleteItem, fullRef,
     deleteRefusal, deletableBranches, deleteBranchesItem,
   };
   if (typeof window !== 'undefined') window.PLMenus = api;

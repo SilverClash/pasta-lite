@@ -455,3 +455,94 @@ test('mounted sidebar: the filter narrows the worktree rows and counts them in "
   assert.deepEqual(t.section().querySelectorAll('.sb-row').map((r) => r.dataset.key), ['worktree:/w/detached']);
   assert.equal(t.root.querySelector('.sb-summary').textContent, 'Viewing 1 of 8');
 });
+
+// ------------------------------------------------------------------ a branch checked out in another worktree
+
+test('checkout refusals: a branch another worktree has checked out gets no double-click and a disabled Checkout ("Checked out in worktree <path>")', () => {
+  const { mod: { rowTarget, doubleClickAction, targetMenuItems } } = loadSidebar();
+  const refs = H.refs({ ...REFS(), remote: [{ name: 'origin/feat/x', remote: 'origin', branch: 'feat/x', oid: SHA('b') }, { name: 'origin/dev', remote: 'origin', branch: 'dev', oid: SHA('c') }] });
+  const s = { busy: false, repo: { root: '/r' }, refs, worktrees: WTS };
+  const dbl = (key, st = s) => doubleClickAction(rowTarget(key, st), st);
+  assert.equal(dbl('local:feat/x'), null, 'feat/x is checked out in /w/feat-x');
+  assert.equal(dbl('local:usb'), null, 'a locked worktree holds its branch too');
+  assert.equal(dbl('remote:origin/feat/x'), null, 'its remote branch would switch to the same local branch');
+  assert.deepEqual(dbl('remote:origin/dev'), { flow: 'checkout', args: [{ target: 'origin/dev', kind: 'remote' }] });
+  assert.deepEqual(dbl('local:feat/x', { ...s, worktrees: [WT.main] }), { flow: 'checkout', args: [{ target: 'feat/x', kind: 'local' }] }, 'free once no worktree has it');
+  assert.deepEqual(dbl('local:feat/x', { ...s, worktrees: null }), { flow: 'checkout', args: [{ target: 'feat/x', kind: 'local' }] }, 'worktrees not read yet: git is the backstop');
+
+  const flows = fakeFlows();
+  const checkout = (key) => targetMenuItems(rowTarget(key, s), s, flows).find((d) => d.flow === 'checkout');
+  assert.deepEqual([checkout('local:feat/x').disabled, checkout('local:feat/x').title], [true, 'Checked out in worktree /w/feat-x']);
+  assert.deepEqual([checkout('local:usb').disabled, checkout('local:usb').title], [true, 'Checked out in worktree /w/usb']);
+  assert.deepEqual([checkout('remote:origin/feat/x').disabled, checkout('remote:origin/feat/x').title], [true, 'Checked out in worktree /w/feat-x']);
+  assert.equal(checkout('remote:origin/dev').disabled, undefined);
+  const main = checkout('local:main');
+  assert.deepEqual([main.disabled, main.title], [true, 'Already checked out'], 'this worktree\'s own branch is the current one, not "elsewhere"');
+});
+
+test('checkoutRefusal: never the current or bare entry, never a commit; the path is display-safe (deleteRefusal shares the lookup)', () => {
+  const { A } = loadSidebar();
+  const s = { worktrees: [WT.main, wt({ path: '/w/x‮', branch: 'x' }), wt({ path: '/srv/r.git', bare: true, branch: 'b' })] };
+  assert.deepEqual(A.checkoutRefusal('x', s), { title: 'Checked out in worktree /w/x\\u{202E}' });
+  assert.equal(A.checkoutRefusal('main', s), null, 'the current worktree\'s branch');
+  assert.equal(A.checkoutRefusal('b', s), null, 'a bare entry has no checkout');
+  assert.equal(A.checkoutRefusal('x', s, { kind: 'commit' }), null);
+  assert.equal(A.checkoutRefusal('x', {}), null);
+  assert.equal(A.deleteRefusal('x', s).title, 'x is checked out in the worktree /w/x\\u{202E}: it can’t be deleted');
+  assert.deepEqual(A.checkoutItem({ target: 'x', kind: 'local', state: s }), { label: 'Checkout', flow: 'checkout', args: [{ target: 'x', kind: 'local' }], disabled: true, title: 'Checked out in worktree /w/x\\u{202E}' });
+  assert.deepEqual(A.checkoutItem({ target: 'x', kind: 'local' }), { label: 'Checkout', flow: 'checkout', args: [{ target: 'x', kind: 'local' }] }, 'without state: unchecked');
+});
+
+test('mounted sidebar: double-clicking a branch checked out in another worktree runs nothing; its menu\'s Checkout is disabled', async (tc) => {
+  const t = await mountSidebar(tc);
+  await t.answerWorktrees();
+  t.dom.dispatch(t.row('local:feat/x').querySelector('.sb-name'), 'dblclick');
+  await H.flush();
+  assert.deepEqual(calls(t.flows), []);
+  t.dom.dispatch(t.row('local:feat/x'), 'contextmenu', { clientX: 1, clientY: 1 });
+  const item = t.menu.opened.at(-1).items.find((i) => i.label === 'Checkout');
+  assert.deepEqual([item.disabled, item.title], [true, 'Checked out in worktree /w/feat-x']);
+});
+
+// ------------------------------------------------------------------ revealing the current worktree (the toolbar's chip)
+
+test('mounted sidebar: revealWorktree opens a collapsed section, clears a filter hiding the row, focuses the current worktree\'s row and flashes it', async (tc) => {
+  tc.mock.timers.enable({ apis: ['setTimeout'] });
+  const t = await mountSidebar(tc, { collapsed: { worktrees: true } });
+  await t.answerWorktrees([{ ...WT.main, current: false }, WT.feat, { ...WT.det, current: true }]);
+  const input = t.root.querySelector('.sb-filter-input');
+  input.value = 'feat';
+  t.dom.dispatch(input, 'input');
+  assert.equal(t.wrow('/w/detached'), undefined, 'collapsed (and filtered out)');
+  t.store.actions.revealWorktree();
+  assert.equal(t.section().classList.contains('collapsed'), false, 'the section is open');
+  assert.equal(JSON.parse(globalThis.localStorage.getItem('pl.sidebar.sections')).worktrees, undefined, 'and stays open');
+  assert.equal(input.value, '', 'the filter that hid the row is cleared');
+  const row = t.wrow('/w/detached');
+  assert.equal(t.dom.doc.activeElement, row, 'the current worktree\'s row has the focus');
+  assert.equal(row.tabIndex, 0, 'and the roving tabindex');
+  assert.equal(row.classList.contains('sb-flash'), true);
+  assert.equal(t.wanted.at(-1), true, 'its dirty dots are wanted again');
+  t.store.set({ worktreeDirty: { '/w/feat-x': true } }); // the dots arrive: the rows are rebuilt
+  const again = t.wrow('/w/detached');
+  assert.notEqual(again, row);
+  assert.equal(again.classList.contains('sb-flash'), true, 'the flash survives a re-render');
+  assert.equal(t.dom.doc.activeElement, again, 'and so does the focus');
+  tc.mock.timers.tick(1200);
+  assert.equal(t.wrow('/w/detached').classList.contains('sb-flash'), false, 'briefly');
+  t.store.set({ worktreeDirty: {} });
+  assert.equal(t.wrow('/w/detached').classList.contains('sb-flash'), false, 'and not again on the next render');
+});
+
+test('mounted sidebar: revealWorktree keeps a filter that shows the row; before the first worktrees read it focuses the section header', async (tc) => {
+  const t = await mountSidebar(tc);
+  t.store.actions.revealWorktree();
+  assert.equal(t.dom.doc.activeElement, t.section().querySelector('.sb-section-header'), 'no rows yet');
+  await t.answerWorktrees();
+  const input = t.root.querySelector('.sb-filter-input');
+  input.value = 'main';
+  t.dom.dispatch(input, 'input');
+  t.store.actions.revealWorktree();
+  assert.equal(input.value, 'main', 'the row is shown: the filter stays');
+  assert.equal(t.dom.doc.activeElement, t.wrow('/r'));
+});

@@ -27,6 +27,11 @@ minor versions may contain breaking changes.
   operation running there. Deleting a detached worktree warns how many of its commits no branch or
   tag keeps. The dirty check skips a worktree whose own config could run a command the repository
   wasn't trusted for. Changes made in a terminal show up automatically.
+- A tab with a linked worktree open says so. Its tab shows a tree icon and reads `project · folder`
+  (the window title too), and a **worktree** chip next to the repository name shows the worktree's
+  folder and its main worktree; click it to jump to the worktree in the sidebar. Branches checked
+  out in another worktree can't be checked out from the branch switcher, the sidebar or the graph;
+  their Checkout is disabled with the worktree's path.
 
 ### Changed
 

@@ -11,8 +11,10 @@
 //   - render git-derived text with textContent / createTextNode only, never innerHTML
 //
 // State keys:
-//   repo         {root, name, head:{sha, branch}, bare} | null   bare: a bare repository, whose status is
-//                main's synthetic clean one, so there is no WIP row and the selection falls back to HEAD
+//   repo         {root, name, head:{sha, branch}, bare, linkedWorktree} | null   bare: a bare repository, whose
+//                status is main's synthetic clean one, so there is no WIP row and the selection falls back to
+//                HEAD; linkedWorktree: {mainPath, mainName, title} when the folder is a linked worktree, else
+//                null (decided in main, src/repo-open.js: the renderer never compares paths)
 //   worktrees    ops 'worktrees' result [{path, head, branch, bare, detached, locked, lockReason, prunable,
 //                prunableReason, missing, main, current}] | null until first read; read for every repository
 //                with every full refresh (the last list is kept when reading fails)
@@ -23,6 +25,8 @@
 //                last read) for the same paths and never while a read of them is still running
 //                the last value is kept when reading
 //                fails. The current worktree is absent: use store.isDirty().
+//   worktreeReveal a counter: actions.revealWorktree() bumps it (the toolbar's linked-worktree chip), and
+//                the sidebar then opens its Worktrees section and focuses the current worktree's row
 //   status       git.status() result | null
 //   refs         git.refs() result | null
 //   refsBySha    Map sha -> [{type:'head'|'local'|'remote'|'tag', name, current?, upstream?, remote?, branch?}]
@@ -113,7 +117,7 @@
       stashError: null, commits: [], hasMore: false, next: null, graph: { width: 0, rows: [] }, rows: [],
       selection: null, commitFiles: null, diff: null, undo: null, undoError: null, busy: false, loading: false,
       loadError: null, remotes: null, remotesError: null, remoteOp: null, pullMode: null, continueDraft: null,
-      rebaseEditor: null, worktrees: null, worktreeDirty: null, centre: 'graph',
+      rebaseEditor: null, worktrees: null, worktreeDirty: null, worktreeReveal: 0, centre: 'graph',
     };
     let loadSeq = 0; // guards against out-of-order loads (repo switch, rapid refreshes)
     // History bookkeeping for state.commits: hashes loaded (paging de-dup), the ref-tips signature
@@ -845,6 +849,7 @@
         setBusy: (busy) => set({ busy: !!busy }),
         setPullMode: (mode) => set({ pullMode: mode == null ? null : mode }),
         setContinueDraft: (draft) => set({ continueDraft: draft || null }),
+        revealWorktree: () => set({ worktreeReveal: state.worktreeReveal + 1 }),
       },
     };
   }

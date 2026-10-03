@@ -9,7 +9,7 @@
 //                                 isBare, bareTitle, bareBlocked, opBlocked, PULL_MODES, effectivePullMode,
 //                                 hasRemotes, headView, availability, gateItems, shortcutFor, shortcutBlocked
 //   menus.js   (window.PLMenus)   the menu descriptors: refMenuItems, commitOpItems, commitItems,
-//                                 stashMenuItems, checkoutItem, createHere, upstreamTarget, behindOf,
+//                                 stashMenuItems, checkoutItem, checkoutRefusal, createHere, upstreamTarget, behindOf,
 //                                 deleteItem, fullRef, deleteRefusal, deletableBranches, deleteBranchesItem,
 //                                 worktreeRefusal, worktreeMenuItems
 // Under node (the tests) this script requires fresh copies of the three, so they bind to the window

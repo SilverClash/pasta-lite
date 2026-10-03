@@ -3,6 +3,8 @@
 // Branch names are grouped into folders by '/' prefix. Clicking a ref or stash selects its commit
 // (store.actions.select); double-click checks out a branch / applies a stash, and a context menu
 // (right-click, Shift+F10 or the ContextMenu key) offers the ref's actions, run through window.PLFlows.
+// A branch checked out in another worktree is not checked out: no double-click, and its Checkout item
+// is disabled with the reason (Components.actions.checkoutRefusal).
 // Local branches can be multi-selected (⌘/Ctrl-click or ⌘/Ctrl+Space toggles, Shift-click or
 // Shift+Arrow selects a range in visible order, a plain click or Esc goes back to one): the menu of a
 // row in such a selection, and of a local folder, only deletes those branches (flow deleteBranches).
@@ -12,6 +14,9 @@
 // Double-click or Enter opens another worktree (flow openWorktree; Space and a click only focus it, and
 // end a branch multi-selection), and its context menu is Components.actions.worktreeMenuItems (open,
 // reveal, copy path, lock / unlock, prune, delete). The filter matches its branch, folder name or head.
+// store.actions.revealWorktree() (the toolbar's linked-worktree chip; store worktreeReveal) opens the
+// section, clears a filter that hides the current worktree's row, then scrolls to that row, focuses it
+// and flashes it (sb-flash, REVEAL_FLASH_MS); before the first worktrees read, the section header.
 // Collapsed sections persist in localStorage (global), collapsed folders per repository. Git data goes
 // through textContent only, via util.displayName (bidi/control characters shown as escapes).
 (function () {
@@ -31,6 +36,7 @@
     { id: 'worktrees', title: 'Worktrees', icon: 'worktree' },
   ];
   const WORKTREES = 'worktrees';
+  const REVEAL_FLASH_MS = 1200; // how long a revealed worktree row stays highlighted
 
   const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
   const cmp = (a, b) => collator.compare(a, b);
@@ -262,8 +268,12 @@
   /** Context menu descriptors for a stash entry (Components.actions.stashMenuItems, as the graph's). */
   const stashMenuItems = (entry, state, flows = flowsOf()) => A.stashMenuItems(entry, state, flows);
 
-  /** The descriptor a double-click on target would run (before the busy / bare checks), or null. */
-  function doubleClickDesc(target) {
+  /**
+   * The descriptor a double-click on target would run (before the busy / bare checks), or null. A
+   * branch checked out in another worktree is not checked out (Components.actions.checkoutRefusal).
+   */
+  function doubleClickDesc(target, state) {
+    if ((target.kind === 'local' || target.kind === 'remote') && A.checkoutRefusal(target.name, state, { kind: target.kind })) return null;
     if (target.kind === 'local') return target.current ? null : { flow: 'checkout', args: [{ target: target.name, kind: 'local' }] };
     if (target.kind === 'remote') return { flow: 'checkout', args: [{ target: target.name, kind: 'remote' }] };
     if (target.kind === 'stash') return { flow: 'stashApply', args: [target.entry.hash] };
@@ -273,14 +283,14 @@
 
   /**
    * The descriptor a double-click (or Enter on a worktree row) on target runs, or null (current branch,
-   * tags, a worktree that can't be opened (worktreeRefusal), busy unless the flow runs while busy
+   * a branch checked out in another worktree, tags, a worktree that can't be opened (worktreeRefusal), busy unless the flow runs while busy
    * (openWorktree), and checkout / apply in a bare repository: they need a working tree,
    * Components.actions.bareBlocked). While a rebase / merge / … is in progress the flow itself refuses
    * with the reason (PLPolicy.opBlocked).
    */
   function doubleClickAction(target, state) {
     if (!target) return null;
-    const d = doubleClickDesc(target);
+    const d = doubleClickDesc(target, state);
     if (!d || (state && state.busy && !FREE_FLOWS.has(d.flow))) return null;
     return bareBlocked(state, d.flow, d.args) ? null : d;
   }
@@ -372,6 +382,8 @@
       let selecting = false; // selectRow is changing the store's selection (not the graph)
       let lastRepoRoot = null;
       let lastSig = null; // JSON of the model the DOM shows
+      let flashKey = null; // the row revealWorktree is flashing (rowEl keeps it across re-renders)
+      let flashTimer = null;
       const isDirty = (st) => (typeof store.isDirty === 'function' ? store.isDirty(st) : false);
       /** The worktrees' dirty dots are read only while their section is open. */
       const wantDirty = (on) => { if (typeof store.actions.setWorktreeDirtyWanted === 'function') store.actions.setWorktreeDirtyWanted(on); };
@@ -418,6 +430,7 @@
         r.tabIndex = -1;
         r.style.setProperty('--level', String(d.level));
         if (d.title) r.title = d.title;
+        if (d.key === flashKey) r.classList.add('sb-flash');
         const twisty = el('span', 'sb-twisty');
         const ic = el('span', 'sb-icon');
         r.append(twisty, ic, el('span', 'sb-name', displayName(d.label)));
@@ -791,6 +804,39 @@
       // tree) don't even build the model.
       const statusKey = (st) => (st ? `${st.branch || ''}:${st.oid || ''}:${isDirty(st) ? 1 : 0}` : '');
       let lastStatusKey = statusKey(store.state.status);
+      /**
+       * Show the current worktree's row (store.actions.revealWorktree): open the section, drop a
+       * filter that hides the row, scroll to it, focus it and flash it. Without the row yet (worktrees
+       * not read), the section header.
+       */
+      function revealWorktree() {
+        const cur = (store.state.worktrees || []).find((w) => w && w.current);
+        const key = cur ? `worktree:${cur.path}` : `section:${WORKTREES}`;
+        if (collapsedSections[WORKTREES]) toggleSection(WORKTREES, true);
+        if (!rowsByKey.has(key) && filter) {
+          input.value = '';
+          clear.hidden = true;
+          setFilter('');
+        }
+        const r = rowsByKey.get(key) || rowsByKey.get(`section:${WORKTREES}`);
+        if (!r) return;
+        focusKey = r.dataset.key;
+        updateRoving();
+        r.scrollIntoView({ block: 'nearest' });
+        r.focus({ preventScroll: true });
+        // flashKey: a re-render meanwhile (the dirty dots arriving) keeps the flash on the new row
+        for (const x of list.querySelectorAll('.sb-flash')) x.classList.remove('sb-flash');
+        flashKey = r.dataset.key;
+        r.classList.add('sb-flash');
+        clearTimeout(flashTimer);
+        flashTimer = setTimeout(() => {
+          const now = rowsByKey.get(flashKey);
+          if (now) now.classList.remove('sb-flash');
+          flashKey = null;
+        }, REVEAL_FLASH_MS);
+      }
+      const offReveal = store.subscribe(['worktreeReveal'], revealWorktree);
+
       const off = store.subscribe(['refs', 'stashes', 'stashError', 'status', 'selection', 'repo', 'worktrees', 'worktreeDirty'], (s, changed) => {
         const repoRoot = s.repo && s.repo.root;
         const sk = statusKey(s.status);
@@ -826,6 +872,8 @@
 
       return () => {
         off();
+        offReveal();
+        clearTimeout(flashTimer);
         wantDirty(false);
         document.removeEventListener('keydown', onDocKey, true);
         list.removeEventListener('click', onClick);

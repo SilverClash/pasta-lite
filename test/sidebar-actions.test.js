@@ -298,6 +298,29 @@ test('pillAction: double-click checks out a non-current local pill only', () => 
   assert.equal(pillAction(null, {}), null);
 });
 
+test('graph: a branch checked out in another worktree: no double-click on its pill, its Checkout items disabled (pill and commit menus)', () => {
+  const { mod: { refPills, pillAction, pillMenuItems, commitMenuItems } } = loadComponent('graph-view.js');
+  const wt = (o) => ({ head: SHA('b'), bare: false, detached: false, locked: false, prunable: false, main: false, current: false, ...o });
+  const worktrees = [wt({ path: '/r', branch: 'main', main: true, current: true }), wt({ path: '/w/feat', branch: 'feat/x' })];
+  const [cur, feat] = refPills([{ type: 'local', name: 'main', current: true }, { type: 'local', name: 'feat/x', current: false }], new Map());
+  const s = { repo: { root: '/r', name: 'r' }, worktrees };
+  assert.equal(pillAction(feat, s), null);
+  assert.equal(pillAction(cur, s), null, 'current: as before');
+  assert.deepEqual(pillAction(feat, { ...s, worktrees: [worktrees[0]] }).flow, 'checkout');
+  const flows = { checkout() {}, createBranch() {}, push() {}, deleteBranch() {}, merge() {}, rebase() {}, interactiveRebase() {} };
+  const state = {
+    ...s, busy: false,
+    refs: H.refs({ head: { branch: 'main', oid: SHA('a'), detached: false }, local: [{ name: 'main', oid: SHA('a'), current: true }, { name: 'feat/x', oid: SHA('b') }] }),
+    refsBySha: new Map([[SHA('b'), [{ type: 'local', name: 'feat/x', current: false }]]]),
+    commits: [{ hash: SHA('a'), parents: [SHA('b')] }, { hash: SHA('b'), parents: [] }],
+  };
+  const row = { kind: 'commit', commit: { hash: SHA('b') } };
+  const fromPill = pillMenuItems(feat, row, state, flows).find((d) => d.flow === 'checkout');
+  assert.deepEqual([fromPill.disabled, fromPill.title], [true, 'Checked out in worktree /w/feat']);
+  const fromRow = commitMenuItems(row, state, flows).find((d) => d.label === 'Checkout feat/x');
+  assert.deepEqual([fromRow.disabled, fromRow.title], [true, 'Checked out in worktree /w/feat']);
+});
+
 // ------------------------------------------------------------------ mounted (local fake DOM)
 //
 // The fake DOM is H.componentDom (test/renderer-harness.js).
