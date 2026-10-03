@@ -28,7 +28,8 @@
 //                            changes to tracked files (ops rebaseContinue always; mergeCommit while status.merge.autostash)
 //   bannerModel(state) -> null | {kind, title, lines: [text], detailLabel, detail, buttons: [descriptor]}
 //                            kind 'bare' for a bare repository (state.repo.bare): "Open worktree <branch>"
-//                            buttons for its linked worktrees (state.worktrees), before every other banner
+//                            buttons for its linked worktrees (state.worktrees, which the store reads for every
+//                            repository), before every other banner
 //   bareWorktrees(worktrees) -> the worktrees the bare banner offers (not bare, not prunable)
 //                            descriptors are Components.actions descriptors {id, label, flow, args, title, disabled?, danger?, primary?}
 //   composerMode(status) -> {mode: 'commit'|'continue'|'rebase'|'merge', key, message?, label?, flow?, stop?,
@@ -233,7 +234,10 @@
     };
   }
 
-  /** The worktrees of a bare repository that can be opened: not the bare repository itself, not prunable (gone). */
+  /**
+   * The worktrees of a bare repository that can be opened: not the bare repository itself, not prunable
+   * (gone). state.worktrees is read for every repository; only a bare one's banner uses this.
+   */
   const bareWorktrees = (list) => (Array.isArray(list) ? list : [])
     .filter((w) => w && typeof w.path === 'string' && w.path && !w.bare && !w.prunable);
 

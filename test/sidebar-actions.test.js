@@ -1342,6 +1342,20 @@ test('selectionMenuItems: only "Delete N branches"; disabled when only the check
   assert.deepEqual([both.disabled, both.title], [true, 'None of these branches can be deleted']);
 });
 
+test('branchMenuItems: in a normal repository the store\'s worktrees disable Delete up front for a branch checked out in a linked worktree', async () => {
+  const { mod: { branchMenuItems, rowTarget } } = loadComponent('sidebar.js');
+  const s = sampleState();
+  const { api, store } = await H.loadedStore(H.repoData({ commits: H.chain([SHA('a')]), refs: s.refs }));
+  assert.equal(store.state.repo.bare, undefined, 'a normal repository');
+  api.take('worktrees').resolve([
+    { path: '/r', head: SHA('a'), branch: 'main', bare: false, detached: false, main: true, current: true },
+    { path: '/w/x', head: SHA('b'), branch: 'feat/x', bare: false, detached: false, main: false, current: false },
+  ]);
+  await H.flush();
+  const del = byLabel(branchMenuItems(rowTarget('local:feat/x', store.state), store.state, fakeFlows()), 'Delete');
+  assert.deepEqual([del.disabled, del.title], [true, 'feat/x is checked out in the worktree /w/x: it can’t be deleted']);
+});
+
 function bulkData() {
   const s = bulkState();
   return H.repoData({ commits: H.chain([SHA('a'), SHA('b')]), status: { ...H.status({ oid: SHA('a') }), upstream: 'origin/main' }, refs: s.refs, stashes: s.stashes });

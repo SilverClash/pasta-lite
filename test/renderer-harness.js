@@ -568,7 +568,7 @@ function scriptedApi(data, handlers = {}) {
   const defaults = {
     status: () => data.status, refs: () => data.refs, stashes: () => data.stashes,
     undoState: () => data.undoState, log: () => data.log, remotes: () => data.remotes || ['origin'],
-    commitFiles: () => [], worktrees: () => data.worktrees || [],
+    commitFiles: () => [], worktrees: () => data.worktrees || [], worktreeDirty: () => data.worktreeDirty || [],
   };
   const run = (op, args, opId) => {
     calls.push({ op, args, opId });

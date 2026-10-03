@@ -222,7 +222,7 @@
    * ('checked out', 'HEAD of the bare repository', 'checked out in the worktree <path>'), `title` the
    * menu item's reason. Refused: the checked-out branch (in a bare repository: the branch HEAD points
    * at; `current` also counts the caller's ref as it) and a branch checked out in a linked worktree
-   * (state.worktrees: kept by the store for bare repositories, re-read by the delete flows; git
+   * (state.worktrees: kept by the store for every repository, re-read by the delete flows; git
    * refuses to delete it). The one source for deleteItem and deletableBranches.
    */
   function deleteRefusal(name, state, { current = false } = {}) {
