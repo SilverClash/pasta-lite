@@ -7,7 +7,7 @@
 // the renderer turns it back into an Error (Components.util.toError, via renderer/store.js).
 const { contextBridge, ipcRenderer } = require('electron');
 
-// 'tabs-changed' {tabs: [{id, title, root|null, active}]}: the window's tabs, on every
+// 'tabs-changed' {tabs: [{id, title, root|null, active, linked}]}: the window's tabs, on every
 // change (opened, closed, moved, switched, a tab's repo changed).
 const EVENTS = new Set(['changed', 'busy', 'watch', 'repo-opened', 'recent-changed', 'menu-command', 'tabs-changed']);
 

@@ -390,13 +390,36 @@ test('openRepo resolves the root from a subdirectory; non-repos give not-a-repo,
   await assert.rejects(ops.openRepo(path.join(dir, 'README.md', 'x')), { kind: 'not-found' });
   // A bare repo opens (test/bare.test.js); a normal repo's .git folder is not bare.
   const bare = h.initRepo({ bare: true });
-  assert.deepEqual(await ops.openRepo(bare), { root: bare, name: path.basename(bare), head: { sha: null, branch: 'main' }, bare: true });
+  assert.deepEqual(await ops.openRepo(bare), { root: bare, name: path.basename(bare), head: { sha: null, branch: 'main' }, bare: true, linkedWorktree: null });
   assert.equal(info.bare, false);
   await assert.rejects(ops.openRepo(path.join(dir, '.git')), { kind: 'not-a-repo' });
   await assert.rejects(ops.openRepo(path.join(dir, '.git', 'refs')), { kind: 'not-a-repo' });
   await assert.rejects(ops.openRepo(''), { kind: 'not-a-repo' });
   const unborn = await ops.openRepo(h.initRepo({ commits: false }));
   assert.deepEqual(unborn.head, { sha: null, branch: 'main' });
+});
+
+test('openRepo / summary: linkedWorktree is set only for a linked worktree, from git\'s dirs (main worktree, its subfolder, normal and bare repos: null)', async () => {
+  const dir = h.initRepo();
+  const wt = path.join(h.tmpDir(), 'feat-wt');
+  h.git(dir, 'worktree', 'add', '-q', '-b', 'feat', wt);
+  fs.mkdirSync(path.join(wt, 'sub'));
+  const want = { mainPath: dir, mainName: path.basename(dir), title: `${path.basename(dir)} · feat-wt` };
+  for (const from of [wt, path.join(wt, 'sub')]) {
+    const info = await ops.openRepo(from);
+    assert.deepEqual([info.root, info.name, info.bare, info.head.branch], [wt, 'feat-wt', false, 'feat'], from);
+    assert.deepEqual(info.linkedWorktree, want, from);
+  }
+  assert.deepEqual((await ops.summary(wt)).linkedWorktree, want, 'app:getState\'s fresh summary agrees');
+  // The main worktree (with a linked one), a plain repo and a bare repo are not linked worktrees.
+  assert.equal((await ops.openRepo(dir)).linkedWorktree, null);
+  assert.equal((await ops.openRepo(h.initRepo())).linkedWorktree, null);
+  assert.equal((await ops.openRepo(h.initRepo({ bare: true }))).linkedWorktree, null);
+  // The bare + worktrees layout: the main "worktree" is the bare git dir; the project is its parent folder.
+  const { top, bare, wt: bareWt } = h.bareWithWorktree();
+  assert.deepEqual((await ops.openRepo(bareWt)).linkedWorktree,
+    { mainPath: bare, mainName: path.basename(top), title: `${path.basename(top)} · ${path.basename(bareWt)}` });
+  assert.equal((await ops.openRepo(top)).linkedWorktree, null, 'the bare repo itself');
 });
 
 test('openRepo passes other git failures through: dubious ownership -> unsafe-repo with git message', async (t) => {

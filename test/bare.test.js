@@ -25,17 +25,20 @@ function runnerWithEvents() {
 
 test('openRepo: the layout folder, the bare git dir and a folder inside it all open the bare repo; the worktree opens as a worktree', async () => {
   const { top, bare, wt } = h.bareWithWorktree();
-  const want = { root: bare, name: `${path.basename(top)}/.bare`, head: { sha: rev(bare, 'main'), branch: 'main' }, bare: true };
+  const want = { root: bare, name: `${path.basename(top)}/.bare`, head: { sha: rev(bare, 'main'), branch: 'main' }, bare: true, linkedWorktree: null };
   for (const dir of [top, bare, path.join(bare, 'refs'), path.join(bare, 'refs', 'heads')]) {
     assert.deepEqual(await ops.openRepo(dir), want, dir);
   }
   const w = await ops.openRepo(wt);
-  assert.deepEqual(w, { root: wt, name: 'main', head: { sha: rev(wt, 'HEAD'), branch: 'main' }, bare: false });
+  assert.deepEqual(w, {
+    root: wt, name: 'main', head: { sha: rev(wt, 'HEAD'), branch: 'main' }, bare: false,
+    linkedWorktree: { mainPath: bare, mainName: path.basename(top), title: `${path.basename(top)} · main` },
+  });
   // summary (app:getState's fresh head) agrees.
   assert.deepEqual(await ops.summary(bare), want);
   // An unborn bare repo: HEAD names its branch, no commit.
   const unborn = h.initRepo({ bare: true, commits: false });
-  assert.deepEqual(await ops.openRepo(unborn), { root: unborn, name: path.basename(unborn), head: { sha: null, branch: 'main' }, bare: true });
+  assert.deepEqual(await ops.openRepo(unborn), { root: unborn, name: path.basename(unborn), head: { sha: null, branch: 'main' }, bare: true, linkedWorktree: null });
   // A .git folder of a normal repo is not bare: still not-a-repo.
   const normal = h.initRepo();
   await assert.rejects(ops.openRepo(path.join(normal, '.git')), { kind: 'not-a-repo' });
@@ -547,7 +550,7 @@ test('stale caches: a normal repo made where a bare one was opens as normal (ope
   remake(true);
   assert.equal((await ops.openRepo(dir)).bare, true);
   remake(false);
-  assert.deepEqual(await ops.openRepo(path.join(dir, 'sub')), { root: dir, name: 'x', head: { sha: rev(dir, 'HEAD'), branch: 'main' }, bare: false });
+  assert.deepEqual(await ops.openRepo(path.join(dir, 'sub')), { root: dir, name: 'x', head: { sha: rev(dir, 'HEAD'), branch: 'main' }, bare: false, linkedWorktree: null });
   // app:getState's summary of a tab whose folder changed underneath it.
   remake(true);
   assert.equal((await ops.openRepo(dir)).bare, true);

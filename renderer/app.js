@@ -108,7 +108,8 @@
     picker.close(); // a picker left open belongs to the previous repo
     renderBusy(); // the previous repo's busy state must not stick
     document.body.dataset.ready = '0';
-    document.title = `${repo.name} — Pasta Lite Git client`;
+    // main's tab title: a linked worktree's 'project · folder' (repo.linkedWorktree), else the name
+    document.title = `${(repo.linkedWorktree && repo.linkedWorktree.title) || repo.name} — Pasta Lite Git client`;
     setView('repo');
     try {
       await store.actions.loadRepo(repo);
