@@ -1148,7 +1148,7 @@ test('worktrees: loadRepo clears worktrees and worktreeDirty, and a stale read f
   assert.equal(api.pending('worktreeDirty').length, 1, 'still wanted: the new repo\'s worktrees are checked, the same path included (TTL reset)');
 });
 
-test('worktreeDirty: read only while wanted; a 5 s TTL for the same paths; force, a changed path list or the TTL re-read', async (t) => {
+test('worktreeDirty: read only while wanted; a 5 s TTL for the same paths; a changed path list or the TTL re-read', async (t) => {
   let now = 1_000_000;
   t.mock.method(Date, 'now', () => now);
   const list = [WT('/bare', { bare: true, main: true }), MAIN_WT, WT('/w/b'), WT('/w/a', { locked: true }), WT('/w/gone', { prunable: true })];
@@ -1176,8 +1176,9 @@ test('worktreeDirty: read only while wanted; a 5 s TTL for the same paths; force
   await store.actions.loadWorktreeDirty();
   assert.equal(api.count('worktreeDirty'), 1, 'within 5 s: no second read');
 
-  // force re-reads at once
-  const forced = store.actions.loadWorktreeDirty({ force: true });
+  // after the TTL, loadWorktreeDirty re-reads
+  now += 1;
+  const forced = store.actions.loadWorktreeDirty();
   api.take('worktreeDirty').resolve([{ path: '/w/a', dirty: true }, { path: '/w/b', dirty: true }]);
   await forced;
   assert.deepEqual(store.state.worktreeDirty, { '/w/a': true, '/w/b': true });
@@ -1297,15 +1298,20 @@ test('worktreeDirty: wanted before the worktrees are read: read once they are', 
 test('worktreeDirty: an older read never lands after a newer one, and a stale result after a repo switch is dropped', async () => {
   const { api, store } = await withWorktrees([MAIN_WT, WT('/w/a')]);
   store.actions.setWorktreeDirtyWanted(true);
-  store.actions.loadWorktreeDirty({ force: true });
+  await fullRefresh(api, store);
+  api.take('worktrees').resolve([MAIN_WT, WT('/w/a'), WT('/w/b')]); // another path list: a second read while the first runs
+  await flush();
   const [older, newer] = api.pending('worktreeDirty');
-  newer.resolve([{ path: '/w/a', dirty: true }]);
+  assert.ok(older && newer);
+  newer.resolve([{ path: '/w/a', dirty: true }, { path: '/w/b', dirty: true }]);
   await flush();
   older.resolve([{ path: '/w/a', dirty: false }]);
   await flush();
-  assert.deepEqual(store.state.worktreeDirty, { '/w/a': true }, 'the newer read wins');
+  assert.deepEqual(store.state.worktreeDirty, { '/w/a': true, '/w/b': true }, 'the newer read wins');
 
-  store.actions.loadWorktreeDirty({ force: true });
+  await fullRefresh(api, store);
+  api.take('worktrees').resolve([MAIN_WT, WT('/w/a')]);
+  await flush();
   const late = api.take('worktreeDirty');
   const p = store.actions.loadRepo({ root: '/s', name: 's' });
   late.resolve([{ path: '/w/a', dirty: false }]);

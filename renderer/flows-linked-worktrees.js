@@ -23,10 +23,11 @@
 
   const baseName = (p) => K.Op().fsBaseName(p);
 
-  /** The entry of the freshly read worktree list whose path is exactly `path`, or null. */
+  /** The entry of the freshly read worktree list whose path is exactly `path`: {entry} (null when it is gone) or {error} (the read failed). */
   async function fresh(store, path) {
-    const { value } = await settle(store.invoke('worktrees'));
-    return (Array.isArray(value) ? value : []).find((w) => w && w.path === path) || null;
+    const { value, error } = await settle(store.invoke('worktrees'));
+    if (error) return { error };
+    return { entry: (Array.isArray(value) ? value : []).find((w) => w && w.path === path) || null };
   }
 
   /**
@@ -35,12 +36,13 @@
    */
   async function checked(store, path, action, verb) {
     if (typeof path !== 'string' || !path) return null;
-    const w = await fresh(store, path);
+    const { entry: w, error } = await fresh(store, path);
+    if (error) { report(store, error); return null; }
     if (!w) {
       await dialog(store).alert({ title: 'Worktree not found', message: 'It was removed or moved meanwhile.' });
       return null;
     }
-    const refused = C.actions.worktreeRefusal(w, action, store.state);
+    const refused = C.actions.worktreeRefusal(w, action);
     if (refused) {
       await dialog(store).alert({ title: `Can't ${verb} this worktree`, message: refused.title });
       return null;
@@ -82,7 +84,8 @@
       if (e.kind !== 'worktree-dirty') { report(store, e); return false; } // worktree-busy included: never forced
       const force = await dialog(store).confirm({
         title: 'Worktree has changes',
-        message: `${dn(path)} has modified or untracked files${e.submodules ? ' or submodules' : ''}. Delete it anyway? Those changes are lost; this can't be undone.`,
+        message: `${dn(path)} has modified or untracked files${e.submodules ? ' or submodules' : ''}. Delete it anyway? Those changes are lost; this can't be undone.`
+          + (e.submodules ? ' Commits in its submodules that were not pushed are lost too.' : ''),
         confirmLabel: 'Force Delete',
         danger: true,
       });
@@ -101,14 +104,25 @@
       store.actions.notify('Nothing to prune');
       return false;
     }
-    const n = entries.length;
-    const ok = await dialog(store).confirm({
-      title: 'Prune worktrees?',
-      message: `Remove git's records of ${C.util.plural(n, 'worktree')} whose folder is gone? Their branches are kept. Locked worktrees are skipped.`,
-      detail: dialog(store).pathListText(entries.map((e) => `${e.id}: ${e.reason}`), n),
-      confirmLabel: 'Prune',
-    });
-    if (!ok) return false;
+    const confirmed = new Set();
+    let shown = entries;
+    // ask; then look again: entries that appeared meanwhile (a drive unplugged) are asked about too
+    for (;;) {
+      const k = shown.length;
+      const ok = await dialog(store).confirm({
+        title: 'Prune worktrees?',
+        message: `Remove git's records of ${C.util.plural(k, 'worktree')} whose folder is gone? Their branches are kept. Locked worktrees are skipped.`,
+        detail: dialog(store).pathListText(shown.map((e) => `${e.id}: ${e.reason}`), k),
+        confirmLabel: 'Prune',
+      });
+      if (!ok) return false;
+      for (const e of shown) confirmed.add(e.id);
+      const again = await settle(store.invoke('worktreePrunePreview'));
+      if (again.error) { report(store, again.error); return false; }
+      shown = (((again.value && again.value.entries) || [])).filter((e) => !confirmed.has(e.id));
+      if (!shown.length) break;
+    }
+    const n = confirmed.size;
     // git may prune more (or fewer) than the preview showed: the notice counts what it removed
     const done = await store.actions.write('pruneWorktrees', []);
     const pruned = done && Array.isArray(done.entries) ? done.entries.length : n;

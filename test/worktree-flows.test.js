@@ -117,7 +117,7 @@ test('menu: main, current, bare, locked, prunable, missing, locked+missing, deta
   items = m(wt({ missing: true }));
   assert.equal(find(items, 'Open').title, 'Its folder is gone');
   assert.equal(find(items, 'Reveal in Finder').disabled, true);
-  assert.equal(find(items, 'Delete…').title, 'Its folder is gone: use Prune');
+  assert.equal(find(items, 'Delete…').title, 'Its folder is gone: Prune is offered once git marks it prunable');
   assert.equal(find(m(wt({ missing: true, prunable: true })), 'Delete…').title, 'Its folder is already gone: use Prune');
 
   items = m(wt({ branch: null, detached: true }));
@@ -140,11 +140,11 @@ test('menu: busy disables everything but Open, Reveal and Copy Path; a missing f
 
 test('worktreeRefusal: null for a missing entry and unknown actions; actions per entry', async () => {
   const { A } = await setup();
-  assert.equal(A.worktreeRefusal(null, 'delete', {}), null);
-  assert.equal(A.worktreeRefusal(NORMAL, 'bogus', {}), null);
-  for (const a of ['open', 'reveal', 'lock', 'unlock', 'delete', 'prune']) assert.equal(A.worktreeRefusal(NORMAL, a, {}), null, a);
-  assert.equal(A.worktreeRefusal(wt({ locked: true, prunable: true }), 'prune', {}), null, 'no prune refusal: git never reports that state');
-  assert.equal(A.worktreeRefusal(MAIN, 'unlock', {}).title, "The main worktree can't be locked");
+  assert.equal(A.worktreeRefusal(null, 'delete'), null);
+  assert.equal(A.worktreeRefusal(NORMAL, 'bogus'), null);
+  for (const a of ['open', 'reveal', 'lock', 'unlock', 'delete', 'prune']) assert.equal(A.worktreeRefusal(NORMAL, a), null, a);
+  assert.equal(A.worktreeRefusal(wt({ locked: true, prunable: true }), 'prune'), null, 'no prune refusal: git never reports that state');
+  assert.equal(A.worktreeRefusal(MAIN, 'unlock').title, "The main worktree can't be locked");
 });
 
 // ------------------------------------------------------------------ policy
@@ -237,6 +237,29 @@ test('removeWorktree: dirty asks again, then force-deletes (submodules in the wo
   assert.doesNotMatch(t.dialogs[1].opts.message, /submodules/);
 });
 
+test('removeWorktree: the force confirm warns about unpushed submodule commits only when there are submodules', async () => {
+  let n = 0;
+  const s = await setup({ removeWorktree: () => { if (++n === 1) throw err('worktree-dirty', 'dirty', { submodules: true }); return true; } }, [true, false]);
+  await s.F.removeWorktree(s.store, '/w/x');
+  assert.match(s.dialogs[1].opts.message, /Commits in its submodules that were not pushed are lost too\.$/);
+  n = 0;
+  const t = await setup({ removeWorktree: () => { if (++n === 1) throw err('worktree-dirty', 'dirty'); return true; } }, [true, false]);
+  await t.F.removeWorktree(t.store, '/w/x');
+  assert.doesNotMatch(t.dialogs[1].opts.message, /not pushed/);
+});
+
+test('a failed worktree list is reported with its own error, not as "not found"', async () => {
+  const s = await setup({}, []);
+  s.api.handlers.worktrees = () => { throw err('unsafe-repo', 'unsafe repository'); };
+  s.dialogs.length = 0;
+  for (const run of [() => s.F.removeWorktree(s.store, '/w/x'), () => s.F.lockWorktree(s.store, '/w/x'), () => s.F.unlockWorktree(s.store, '/w/x')]) {
+    s.toasts.length = 0;
+    assert.equal(await run(), false);
+    assert.deepEqual(s.errors().map((e) => e.message), ['unsafe repository']);
+    assert.equal(s.dialogs.length, 0, 'no "Worktree not found" alert');
+  }
+});
+
 test('removeWorktree: a declined force stops; other errors are reported once', async () => {
   const s = await setup({ removeWorktree: () => { throw err('worktree-dirty', 'dirty'); } }, [true, false]);
   assert.equal(await s.F.removeWorktree(s.store, '/w/x'), false);
@@ -300,6 +323,34 @@ test('pruneWorktrees: the notice counts the entries the prune returned, not the 
   const t = await setup({ worktreePrunePreview: () => ({ entries: preview }), pruneWorktrees: () => ({ entries: [] }) }, [true]);
   await t.F.pruneWorktrees(t.store);
   assert.deepEqual(t.notices(), ['Nothing was pruned']);
+});
+
+test('pruneWorktrees: entries that appear after the confirm are asked about before anything is written', async () => {
+  const a = { id: 'a', reason: 'gone' };
+  const b = { id: 'b', reason: 'drive unplugged' };
+  let n = 0;
+  const s = await setup({ worktreePrunePreview: () => ({ entries: ++n === 1 ? [a] : [a, b] }), pruneWorktrees: () => ({ entries: [a, b] }) }, [true, true]);
+  assert.equal(await s.F.pruneWorktrees(s.store), true);
+  assert.equal(s.dialogs.length, 2);
+  assert.equal(s.dialogs[1].opts.detail, 'b: drive unplugged', 'only the new entries are listed');
+  assert.deepEqual(calls(s.api, 'pruneWorktrees'), [[]]);
+  assert.deepEqual(s.notices(), ['Pruned 2 worktrees']);
+
+  n = 0;
+  const t = await setup({ worktreePrunePreview: () => ({ entries: ++n === 1 ? [a] : [a, b] }), pruneWorktrees: () => true }, [true, false]);
+  assert.equal(await t.F.pruneWorktrees(t.store), false);
+  assert.deepEqual(calls(t.api, 'pruneWorktrees'), [], 'declining the second ask writes nothing');
+
+  const u = await setup({ worktreePrunePreview: () => ({ entries: [a] }), pruneWorktrees: () => true }, [true]);
+  await u.F.pruneWorktrees(u.store);
+  assert.equal(u.dialogs.length, 1, 'an unchanged preview asks once');
+  assert.equal(calls(u.api, 'worktreePrunePreview').length, 2);
+
+  let m = 0;
+  const v = await setup({ worktreePrunePreview: () => { if (++m === 2) throw err('boom', 'recheck failed'); return { entries: [a] }; }, pruneWorktrees: () => true }, [true]);
+  assert.equal(await v.F.pruneWorktrees(v.store), false);
+  assert.deepEqual(calls(v.api, 'pruneWorktrees'), []);
+  assert.deepEqual(v.errors().map((e) => e.message), ['recheck failed']);
 });
 
 test('pruneWorktrees: a failing preview is reported', async () => {

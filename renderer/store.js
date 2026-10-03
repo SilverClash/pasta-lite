@@ -21,7 +21,7 @@
 //                only while wanted (actions.setWorktreeDirtyWanted: the sidebar's Worktrees section is
 //                open), with each worktrees read, at most once per DIRTY_TTL_MS (from the end of the
 //                last read) for the same paths and never while a read of them is still running
-//                (actions.loadWorktreeDirty({force}) skips both); the last value is kept when reading
+//                the last value is kept when reading
 //                fails. The current worktree is absent: use store.isDirty().
 //   status       git.status() result | null
 //   refs         git.refs() result | null
@@ -560,9 +560,9 @@
     /**
      * Re-read state.worktreeDirty (ops worktreeDirty) unless the same linked worktrees were checked
      * < DIRTY_TTL_MS ago or are being checked right now (that read's promise is returned, so a slow
-     * read is never overlapped by another for the same paths); `force` skips both. Never rejects.
+     * read is never overlapped by another for the same paths). Never rejects.
      */
-    function loadWorktreeDirty({ force = false } = {}) {
+    function loadWorktreeDirty() {
       if (!state.repo || !Array.isArray(state.worktrees)) return Promise.resolve();
       const paths = state.worktrees.filter((w) => !w.bare && !w.prunable && !w.missing && !w.current).map((w) => w.path).sort();
       const key = JSON.stringify(paths);
@@ -574,8 +574,8 @@
         if (!sameJSON(state.worktreeDirty, {})) set({ worktreeDirty: {} });
         return Promise.resolve();
       }
-      if (!force && dirtyInFlight && dirtyInFlight.key === key) return dirtyInFlight.promise;
-      if (!force && key === dirtyKey && Date.now() - dirtyAt < DIRTY_TTL_MS) return Promise.resolve();
+      if (dirtyInFlight && dirtyInFlight.key === key) return dirtyInFlight.promise;
+      if (key === dirtyKey && Date.now() - dirtyAt < DIRTY_TTL_MS) return Promise.resolve();
       const seq = loadSeq;
       const mine = ++dirtySeq;
       dirtyKey = key;

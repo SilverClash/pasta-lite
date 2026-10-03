@@ -26,7 +26,7 @@
 //   deletableBranches(names, state) -> {names, skipped: [{name, why, title}]}   what a bulk delete removes
 //   deleteBranchesItem(names, state, {label?(n), flows?}) -> the finished "Delete N branches" descriptor
 //                                   (sidebar multi-selection and folder menus; N: the deletable ones)
-//   worktreeRefusal(w, action, state) -> {title} | null   why linked-worktree entry `w` (a state.worktrees
+//   worktreeRefusal(w, action) -> {title} | null   why linked-worktree entry `w` (a state.worktrees
 //                                   item) can't be opened / revealed / locked / unlocked / deleted / pruned
 //   worktreeMenuItems(w, state, flows?, {platform?}?) -> finished descriptors of a sidebar worktree row: Open,
 //                                   Reveal (Finder / Explorer / File Manager), Copy Path, Lock… / Unlock,
@@ -347,9 +347,9 @@
    * or 'delete'), or null: {title} (display-safe). The renderer's mirror of main's safety checks (main
    * re-checks them; a rebase or merge in progress there is refused by main alone: worktree-busy).
    * `missing` (the folder is gone; git marks only unlocked ones prunable) counts like prunable for
-   * Open and Reveal. `state` is unused for now; it keeps the signature of deleteRefusal.
+   * Open and Reveal.
    */
-  function worktreeRefusal(w, action, state) { // eslint-disable-line no-unused-vars
+  function worktreeRefusal(w, action) {
     if (!w) return null;
     const gone = !!(w.prunable || w.missing);
     switch (action) {
@@ -371,7 +371,7 @@
         if (w.current) return { title: 'This tab has this worktree open: open another worktree and delete it from there' };
         if (w.locked) return { title: `Locked${w.lockReason ? ` (${dn(w.lockReason)})` : ''}: unlock it first` };
         if (w.prunable) return { title: 'Its folder is already gone: use Prune' };
-        if (w.missing) return { title: 'Its folder is gone: use Prune' };
+        if (w.missing) return { title: 'Its folder is gone: Prune is offered once git marks it prunable' };
         return null;
       default:
         return null;
@@ -389,8 +389,8 @@
   function worktreeMenuItems(w, state, flows = flowsOf(), { platform } = {}) {
     if (!w) return [];
     const off = (d, no) => (no ? { ...d, disabled: true, title: no.title } : d);
-    const open = off({ label: 'Open', flow: 'openWorktree', args: [w.path], title: 'Show the tab that has it open, else open it in a new tab' }, worktreeRefusal(w, 'open', state));
-    const reveal = off({ label: revealLabel(platform), flow: 'revealWorktree', args: [w.path] }, worktreeRefusal(w, 'reveal', state));
+    const open = off({ label: 'Open', flow: 'openWorktree', args: [w.path], title: 'Show the tab that has it open, else open it in a new tab' }, worktreeRefusal(w, 'open'));
+    const reveal = off({ label: revealLabel(platform), flow: 'revealWorktree', args: [w.path] }, worktreeRefusal(w, 'reveal'));
     const items = [
       open,
       reveal,
@@ -398,10 +398,10 @@
       { separator: true },
       off(w.locked
         ? { label: 'Unlock', flow: 'unlockWorktree', args: [w.path] }
-        : { label: 'Lock…', flow: 'lockWorktree', args: [w.path] }, worktreeRefusal(w, w.locked ? 'unlock' : 'lock', state)),
+        : { label: 'Lock…', flow: 'lockWorktree', args: [w.path] }, worktreeRefusal(w, w.locked ? 'unlock' : 'lock')),
     ];
     if (w.prunable) items.push({ label: 'Prune…', flow: 'pruneWorktrees', args: [] });
-    items.push({ separator: true }, off({ label: 'Delete…', flow: 'removeWorktree', args: [w.path], danger: true }, worktreeRefusal(w, 'delete', state)));
+    items.push({ separator: true }, off({ label: 'Delete…', flow: 'removeWorktree', args: [w.path], danger: true }, worktreeRefusal(w, 'delete')));
     return finish(items, state || {}, flows);
   }
 

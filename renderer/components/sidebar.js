@@ -263,11 +263,11 @@
   const stashMenuItems = (entry, state, flows = flowsOf()) => A.stashMenuItems(entry, state, flows);
 
   /** The descriptor a double-click on target would run (before the busy / bare checks), or null. */
-  function doubleClickDesc(target, state) {
+  function doubleClickDesc(target) {
     if (target.kind === 'local') return target.current ? null : { flow: 'checkout', args: [{ target: target.name, kind: 'local' }] };
     if (target.kind === 'remote') return { flow: 'checkout', args: [{ target: target.name, kind: 'remote' }] };
     if (target.kind === 'stash') return { flow: 'stashApply', args: [target.entry.hash] };
-    if (target.kind === 'worktree') return A.worktreeRefusal(target.entry, 'open', state) ? null : { flow: 'openWorktree', args: [target.entry.path] };
+    if (target.kind === 'worktree') return A.worktreeRefusal(target.entry, 'open') ? null : { flow: 'openWorktree', args: [target.entry.path] };
     return null;
   }
 
@@ -280,7 +280,7 @@
    */
   function doubleClickAction(target, state) {
     if (!target) return null;
-    const d = doubleClickDesc(target, state);
+    const d = doubleClickDesc(target);
     if (!d || (state && state.busy && !FREE_FLOWS.has(d.flow))) return null;
     return bareBlocked(state, d.flow, d.args) ? null : d;
   }
