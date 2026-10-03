@@ -46,6 +46,7 @@ const path = require('node:path');
 const { out } = require('./exec');
 const { parseStageEntries } = require('./porcelain');
 const { logger } = require('./log');
+const { realPathSync } = require('./fs-paths');
 
 const watcherLog = logger.child('watcher');
 /** Default `log` for createWatcher: a warning in the shared logger. */
@@ -167,13 +168,8 @@ async function listIgnored(root) {
   return raw.split('\0').filter(Boolean).map((p) => p.replace(/\/$/, ''));
 }
 
-const realpath = (p) => {
-  try {
-    return fs.realpathSync.native(p);
-  } catch {
-    return p; // missing (the root went away) or unreadable: compare the resolved spelling
-  }
-};
+// Missing (the root went away) or unreadable: the resolved spelling is compared.
+const realpath = realPathSync;
 
 const isRuleFile = (p) => p === '.gitignore' || p.endsWith('/.gitignore');
 

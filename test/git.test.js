@@ -3,6 +3,7 @@ const { test, describe, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { tmpDir, git, initRepo, write, read, commitFile, repoWithRemote, hostileConfig, cleanup } = require('./helpers');
 const g = require('../src/git');
 
@@ -1533,9 +1534,11 @@ describe('linked worktrees: list, remove, prune, lock / unlock, the dirty check'
     const by = byPath(list);
     assert.deepEqual(by[wts.a], {
       path: wts.a, head: head(dir), branch: 'a', bare: false, detached: false,
-      locked: true, lockReason: 'on a stick', prunable: false, prunableReason: null, main: false, current: false,
+      locked: true, lockReason: 'on a stick', prunable: false, prunableReason: null, main: false, current: false, missing: false,
     });
     assert.equal(by[wts.gone].prunable, true);
+    assert.equal(by[wts.gone].missing, true);
+    assert.equal(by[dir].missing, false);
     assert.match(by[wts.gone].prunableReason, /non-existent location/);
     // From the linked worktree (and from a folder inside it): that one is current.
     fs.mkdirSync(path.join(wts.a, 'sub'));
@@ -1553,8 +1556,33 @@ describe('linked worktrees: list, remove, prune, lock / unlock, the dirty check'
     fs.symlinkSync(wts.a, linkA);
     assert.deepEqual((await g.worktrees(link)).map((w) => [w.path, w.current]), [[dir, true], [wts.a, false]]);
     assert.deepEqual((await g.worktrees(linkA)).map((w) => [w.path, w.current]), [[dir, false], [wts.a, true]]);
-    assert.equal(g.realPath(link), dir);
-    assert.equal(g.realPath(path.join(link, 'missing', '..', 'x')), path.join(link, 'x'), 'a missing path: path.resolve');
+    assert.equal(g.realPath, undefined, 'not on the git facade: src/fs-paths.js');
+  });
+
+  test('worktrees: a locked worktree whose folder is gone is missing, though git doesn\'t call it prunable', async () => {
+    const { dir, wts } = withWorktrees('usb', 'here');
+    git(dir, 'worktree', 'lock', '--reason', 'on a stick', wts.usb);
+    fs.rmSync(wts.usb, { recursive: true, force: true });
+    const by = byPath(await g.worktrees(dir));
+    assert.deepEqual([by[wts.usb].locked, by[wts.usb].prunable, by[wts.usb].missing], [true, false, true]);
+    assert.equal(by[wts.here].missing, false);
+    // The dirty check skips it (no git process in a folder that isn't there).
+    assert.deepEqual(await g.worktreesDirty(dir), [{ path: wts.here, dirty: false }]);
+  });
+
+  test('unreachableCount: the commits a detached HEAD reaches that no branch, tag or remote ref does', async () => {
+    const { dir, wts } = withWorktrees('a');
+    git(wts.a, 'checkout', '-q', '--detach');
+    const at = (cwd) => git(cwd, 'rev-parse', 'HEAD').trim();
+    assert.equal(await g.unreachableCount(dir, at(wts.a)), 0, 'on branch a\'s tip');
+    commitFile(wts.a, 'x.txt', '1\n', 'one');
+    commitFile(wts.a, 'y.txt', '2\n', 'two');
+    assert.equal(await g.unreachableCount(dir, at(wts.a)), 2);
+    git(dir, 'tag', 'keep', `${at(wts.a)}~1`);
+    assert.equal(await g.unreachableCount(dir, at(wts.a)), 1, 'a tag keeps the older one');
+    git(dir, 'update-ref', 'refs/remotes/origin/x', at(wts.a));
+    assert.equal(await g.unreachableCount(dir, at(wts.a)), 0, 'a remote-tracking ref keeps both');
+    await assert.rejects(g.unreachableCount(dir, '--all'), { kind: 'invalid-args' });
   });
 
   test('removeWorktree: a clean one goes; modified or untracked files are worktree-dirty until forced', async () => {
@@ -1632,9 +1660,41 @@ describe('linked worktrees: list, remove, prune, lock / unlock, the dirty check'
     assert.equal(capped.length, 3);
     assert.deepEqual(capped.slice(1).map((w) => w.dirty), [null, null], 'beyond the cap: unknown');
     assert.notEqual(capped[0].dirty, null, 'the first one is checked');
-    for (let i = 0; i < 300; i++) write(wts.untr, `many/f${i}.txt`, 'x\n');
-    const timed = await g.worktreesDirty(dir, { timeout: 1 });
-    assert.deepEqual(timed.map((w) => w.dirty), [null, null, null], 'killed after 1 ms: unknown');
     assert.deepEqual(await g.worktreesDirty(path.join(tmpDir(), 'not-a-repo')), [], 'never rejects');
+  });
+
+  test('worktreesDirty: at most `concurrency` statuses at once; one past its timeout is null', { skip: process.platform === 'win32' }, async (t) => {
+    const { dir } = withWorktrees('a', 'b', 'c', 'd', 'e', 'f');
+    // A git that logs each status's start and end and holds it for a while.
+    const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    const bin = path.join(tmpDir(), 'git');
+    const log = path.join(tmpDir(), 'status.log');
+    fs.writeFileSync(bin, `#!/bin/sh
+case " $* " in
+  *" status "*) echo start >> "${log}"; sleep 0.3; "${realGit}" "$@"; rc=$?; echo end >> "${log}"; exit $rc ;;
+esac
+exec "${realGit}" "$@"
+`, { mode: 0o755 });
+    const exec = require('../src/exec');
+    exec.setGitBinary(bin);
+    t.after(() => exec.setGitBinary(null));
+    const peak = () => {
+      let n = 0;
+      let max = 0;
+      for (const line of fs.readFileSync(log, 'utf8').split('\n')) {
+        if (line === 'start') max = Math.max(max, ++n);
+        if (line === 'end') n--;
+      }
+      return max;
+    };
+    const res = await g.worktreesDirty(dir, { concurrency: 4 });
+    assert.deepEqual(res.map((w) => w.dirty), [false, false, false, false, false, false]);
+    assert.equal(peak(), 4, 'six to check, four at a time');
+    fs.rmSync(log);
+    await g.worktreesDirty(dir, { concurrency: 2 });
+    assert.equal(peak(), 2);
+    fs.rmSync(log);
+    const timed = await g.worktreesDirty(dir, { timeout: 100, max: 2 });
+    assert.deepEqual(timed.map((w) => w.dirty), [null, null, null, null, null, null], 'killed after 100 ms (held 300): unknown');
   });
 });

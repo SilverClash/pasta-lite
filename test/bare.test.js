@@ -159,7 +159,7 @@ test('reads work in a bare repo: refs, log, commit files and diffs, stashes, rem
   assert.deepEqual(await run(bare, 'remotes'), ['origin']);
   assert.equal((await run(bare, 'lastCommitMessage')).sha, rev(bare, 'main'));
   const wts = await run(bare, 'worktrees');
-  const none = { detached: false, locked: false, lockReason: null, prunable: false, prunableReason: null };
+  const none = { detached: false, locked: false, lockReason: null, prunable: false, prunableReason: null, missing: false };
   assert.deepEqual(wts, [
     { path: bare, head: null, branch: null, bare: true, ...none, main: true, current: true },
     { path: wt, head: rev(wt, 'HEAD'), branch: 'main', bare: false, ...none, main: false, current: false },
@@ -180,9 +180,10 @@ test('git.worktrees: detached, locked and prunable entries', async () => {
   const by = Object.fromEntries(list.map((w) => [w.path, w]));
   assert.deepEqual(by[det], {
     path: det, head: rev(bare, 'main'), branch: null, bare: false, detached: true,
-    locked: true, lockReason: 'on a stick', prunable: false, prunableReason: null, main: false, current: false,
+    locked: true, lockReason: 'on a stick', prunable: false, prunableReason: null, main: false, current: false, missing: false,
   });
   assert.equal(by[gone].prunable, true);
+  assert.equal(by[gone].missing, true);
   assert.equal(by[gone].prunableReason, 'gitdir file points to non-existent location');
   assert.equal(by[gone].branch, 'side');
   assert.equal(by[wt].locked, false);
@@ -190,7 +191,7 @@ test('git.worktrees: detached, locked and prunable entries', async () => {
   const normal = h.initRepo();
   assert.deepEqual(await git.worktrees(normal), [{
     path: normal, head: rev(normal, 'HEAD'), branch: 'main', bare: false, detached: false,
-    locked: false, lockReason: null, prunable: false, prunableReason: null, main: true, current: true,
+    locked: false, lockReason: null, prunable: false, prunableReason: null, main: true, current: true, missing: false,
   }]);
 });
 
@@ -217,6 +218,11 @@ test('linked worktrees from the bare repo: lock, unlock, remove and prune work; 
   assert.deepEqual((await run(bare, 'worktrees')).map((w) => w.path), [bare, wt]);
   assert.deepEqual(await run(bare, 'worktreeDirty'), [{ path: wt, dirty: false }], 'the bare entry is never checked');
   assert.equal(h.git(bare, 'branch', '--list', 'other').trim(), 'other', 'the branch is kept');
+  assert.deepEqual((await run(bare, 'worktrees')).map((w) => w.missing), [false, false], 'the bare entry is never missing');
+  assert.deepEqual(await run(bare, 'worktreeUnreachable', bare), { count: 0 }, 'the bare entry has no HEAD to lose');
+  h.git(wt, 'checkout', '-q', '--detach');
+  h.commitFile(wt, 'lost.txt', 'x\n', 'on a detached HEAD');
+  assert.deepEqual(await run(bare, 'worktreeUnreachable', wt), { count: 1 });
 });
 
 test('createBranch (no checkout) and deleteBranch work in a bare repo; undo recreates the branch, redo deletes it again', async () => {

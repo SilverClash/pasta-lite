@@ -69,6 +69,7 @@
     'unrelated-histories': 'the histories to merge have no commit in common',
     'unsafe-repo': 'git refuses the repository (dubious ownership)',
     unsupported: 'git can\'t do this here (a type change, a remote without a fetch refspec)',
+    'worktree-busy': 'a rebase, merge or similar is stopped in the worktree (`state`), or another tab is running a write there: finish it first',
     'worktree-dirty': 'the worktree has modified or untracked files, or submodules (`submodules`); force deletes it',
     'worktree-locked': 'the worktree is locked (`reason`): unlock it first',
   });

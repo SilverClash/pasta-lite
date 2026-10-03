@@ -15,10 +15,12 @@ const abortedError = () => kindError('aborted', 'Operation was cancelled');
 
 /**
  * @param {{ops: object, writeOps: Set<string>, gate?: (repo, name, args) => Promise<Error|null>,
- *   log?: object, now?: () => number}} o the registry (name -> op), the names of the writes, the
- *   refusal asked before anything runs (bare-gate.js; ops.createRunner passes the registry's),
- *   a logger (src/log.js child) that gets one record per op (default: the shared logger's 'ops'
- *   scope) and the clock (tests).
+ *   vet?: (repo, name, checked) => Promise<Error|null>, log?: object, now?: () => number}} o the
+ *   registry (name -> op), the names of the writes, the refusal asked before anything runs
+ *   (bare-gate.js; ops.createRunner passes the registry's), the refusal asked once an op's check
+ *   passed, with its checked arguments, just before it starts (ops.createRunner: a write running
+ *   in the folder an op is about to delete), a logger (src/log.js child) that gets one record per
+ *   op (default: the shared logger's 'ops' scope) and the clock (tests).
  * Returns an EventEmitter with run(repo, op, args, {opId}), cancel(opId), and for quitting
  * running(), cancelAll() and settled() (see there). Events (writes only,
  * and only for a write that passed validation and actually started):
@@ -29,7 +31,7 @@ const abortedError = () => kindError('aborted', 'Operation was cancelled');
  * processes and their hooks are killed and it rejects with kind 'aborted'.
  */
 function createRunner({
-  ops, writeOps, gate = async () => null, log = logger.child('ops'), now = Date.now,
+  ops, writeOps, gate = async () => null, vet = async () => null, log = logger.child('ops'), now = Date.now,
 } = {}) {
   const events = new EventEmitter();
   const queues = new Map(); // repo -> tail promise of its write queue
@@ -38,7 +40,8 @@ function createRunner({
 
   /** Validate, then run `name` with every git command it spawns bound to `signal`. */
   // Ops built with op() get the runner's signal as act's last argument (the renderer's args never
-  // reach act unchecked); plain ops just run under it (exec.withSignal).
+  // reach act unchecked); plain ops just run under it (exec.withSignal). An op() is also vetted
+  // after its check (`vet`), still before onStart: a refusal emits no events either.
   // Bare repositories (bareGate): an op that needs a working tree (for these args), or
   // a fetch into a mirror, is refused first, before validation and before onStart, so it changes
   // nothing and a write emits no busy / changed events. Here rather than before the queue: a write
@@ -56,6 +59,8 @@ function createRunner({
         } catch (err) {
           throw signal.aborted ? abortedError() : err;
         }
+        const vetoed = await vet(repo, name, checked);
+        if (vetoed) throw vetoed;
       }
       const act = checked ? () => fn.act(repo, ...checked, signal) : () => fn(repo, ...args);
       if (signal.aborted) throw abortedError();

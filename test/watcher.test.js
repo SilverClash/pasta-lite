@@ -871,10 +871,8 @@ test('classify / noisyGit: worktrees/ entries count in every repo', () => {
   for (const p of ['.git/worktrees/x/index', '.git/worktrees/x/HEAD.lock', '.git/worktrees/x/logs/HEAD', '.git/worktrees/x/gitdir']) {
     assert.equal(classify(p), null, p);
   }
-  for (const bare of [false, true]) {
-    assert.equal(noisyGit('worktrees/x', bare), false);
-    assert.equal(noisyGit('worktrees/x/logs', bare), true);
-  }
+  assert.equal(noisyGit('worktrees/x'), false);
+  assert.equal(noisyGit('worktrees/x/logs'), true);
 });
 
 describe('bare repository (option bare)', () => {

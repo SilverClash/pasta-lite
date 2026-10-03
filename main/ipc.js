@@ -17,7 +17,7 @@
 const os = require('node:os');
 const ops = require('../src/ops');
 const { kindError } = require('../src/exec');
-const { revealableWorktree } = require('../src/repo-opening');
+const { freshWorktreeEntry } = require('../src/repo-opening');
 const { CHANNELS, SMOKE_ONLY_CHANNELS, routeSender, isIndexUrl, ownedOpId } = require('../src/ipc-contract');
 
 /**
@@ -138,13 +138,11 @@ function createHandlers({ runner, controller, opening, recentView, rendererLog, 
     // A worktree of the tab's repo: only a path `git worktree list` gives for it now.
     'app:openWorktree': ({ session: s }, wtPath) => opening().openWorktreeOf(s, wtPath),
     // Show a worktree of the tab's repo in the file manager: only a path `git worktree list`
-    // gives for it now (not a prunable one), and only if the tab still has that repo.
+    // gives for it now (the bare entry included; not one whose folder is gone: not-found), and
+    // only if the tab still has that repo (else false).
     async 'app:revealWorktree'({ session: s }, wtPath) {
-      const repo = s.repo;
-      const list = await listWorktrees(repo.root);
-      if (s.repo !== repo) return false;
-      const entry = revealableWorktree(list, wtPath);
-      if (!entry) throw kindError('not-found', 'This worktree is no longer listed');
+      const entry = await freshWorktreeEntry(listWorktrees, s, wtPath, { allowBare: true });
+      if (!entry) return false;
       shell.showItemInFolder(entry.path);
       return true;
     },
