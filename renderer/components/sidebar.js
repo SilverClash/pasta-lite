@@ -1,11 +1,16 @@
 'use strict';
-// Left sidebar: filter box + collapsible LOCAL / REMOTE / TAGS / STASHES sections.
+// Left sidebar: filter box + collapsible LOCAL / REMOTE / TAGS / STASHES / WORKTREES sections.
 // Branch names are grouped into folders by '/' prefix. Clicking a ref or stash selects its commit
 // (store.actions.select); double-click checks out a branch / applies a stash, and a context menu
 // (right-click, Shift+F10 or the ContextMenu key) offers the ref's actions, run through window.PLFlows.
 // Local branches can be multi-selected (⌘/Ctrl-click or ⌘/Ctrl+Space toggles, Shift-click or
 // Shift+Arrow selects a range in visible order, a plain click or Esc goes back to one): the menu of a
 // row in such a selection, and of a local folder, only deletes those branches (flow deleteBranches).
+// WORKTREES lists git's worktrees of the repository (store worktrees, in git's order): the one this
+// tab shows is highlighted, a dot marks uncommitted changes (store worktreeDirty, read only while the
+// section is open: actions.setWorktreeDirtyWanted; the current one's from store.isDirty()).
+// Double-click or Enter opens another worktree (flow openWorktree), and its context menu is
+// Components.actions.worktreeMenuItems (open, reveal, copy path, lock / unlock, prune, delete).
 // Collapsed sections persist in localStorage (global), collapsed folders per repository. Git data goes
 // through textContent only, via util.displayName (bidi/control characters shown as escapes).
 (function () {
@@ -22,7 +27,9 @@
     { id: 'remote', title: 'Remote', icon: 'cloud' },
     { id: 'tags', title: 'Tags', icon: 'tag' },
     { id: 'stashes', title: 'Stashes', icon: 'stash' },
+    { id: 'worktrees', title: 'Worktrees', icon: 'worktree' },
   ];
+  const WORKTREES = 'worktrees';
 
   const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
   const cmp = (a, b) => collator.compare(a, b);
@@ -38,8 +45,9 @@
   // ------------------------------------------------------------------ model (pure)
   //
   // The sidebar is rendered from a plain model: sections of row descriptors
-  //   {key, kind: 'ref'|'folder'|'stash', level, label, title, sha, cls, icon, badges: [{cls, text}],
-  //    toggle?, expanded?, count?, date?}
+  //   {key, kind: 'ref'|'folder'|'stash'|'worktree', level, label, title, sha, cls, icon,
+  //    badges: [{cls, text, icon?}], sub?, toggle?, expanded?, count?, date?}
+  // `sub`: a muted second name after the label (a worktree's folder name).
   // Titles are display-safe; labels go through displayName when rendered. Equal models (compared
   // as JSON) mean the DOM is left alone.
 
@@ -85,11 +93,47 @@
   const remoteDesc = refDesc('remote');
   const tagDesc = refDesc('tag');
 
+  /** The last component of a path ('/' or '\\' separated), trailing separators ignored. */
+  const fsBaseName = (p) => String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || String(p || '');
+
   /**
-   * data: {refs, status, stashes, stashError}; view: {filter (lower-cased), collapsedSections (object),
-   * collapsedFolders (Set)}. Returns {sections: [{id, title, icon, open, count, rows, emptyText}], summary}.
+   * The row of state.worktrees entry `w`. dirty: true (the dot) | false | null (unknown); `current`
+   * is the tab's own worktree (decided in main, the renderer never compares paths).
    */
-  function sidebarModel({ refs, status: st, stashes, stashError }, { filter = '', collapsedSections = {}, collapsedFolders = new Set() } = {}) {
+  function worktreeDesc(w, dirty) {
+    const detached = !w.bare && !w.branch;
+    let label;
+    let what;
+    if (w.bare) [label, what] = ['bare repository', 'Bare repository'];
+    else if (w.branch) [label, what] = [w.branch, `Branch ${displayName(w.branch)}`];
+    else if (w.head) [label, what] = [short(w.head), `Detached HEAD at ${short(w.head)}`];
+    else [label, what] = ['no commits', 'No commits yet'];
+    const sub = fsBaseName(w.path);
+    const badges = [];
+    if (w.main) badges.push({ cls: 'sb-note sb-wt-main', text: 'main' });
+    if (w.locked) badges.push({ cls: 'sb-wt-locked', icon: 'lock', text: '' });
+    if (w.prunable) badges.push({ cls: 'sb-gone', text: 'missing' });
+    if (dirty === true) badges.push({ cls: 'sb-dirty', text: '●' });
+    const lines = [displayName(w.path), what];
+    if (w.main) lines.push(w.bare ? 'The repository itself' : 'Main worktree');
+    if (w.current) lines.push('Open in this tab');
+    if (w.locked) lines.push(`Locked${w.lockReason ? `: ${displayName(w.lockReason)}` : ''}`);
+    if (w.prunable) lines.push(`Folder missing${w.prunableReason ? `: ${displayName(w.prunableReason)}` : ''}`);
+    if (dirty === true) lines.push('Has uncommitted changes');
+    const cls = [w.current && 'current', w.prunable && 'sb-wt-prunable', detached && 'detached'].filter(Boolean).join(' ');
+    return {
+      key: `worktree:${w.path}`, kind: 'worktree', level: 0, label, sub: sub === label ? '' : sub, sha: null,
+      title: lines.join('\n'), cls, icon: w.current ? 'home' : (detached ? 'detached' : 'worktree'), badges,
+    };
+  }
+
+  /**
+   * data: {refs, status, stashes, stashError, worktrees (null: not read yet), worktreeDirty
+   * ({[path]: bool|null} | null), currentDirty (the tab's own worktree)}; view: {filter (lower-cased),
+   * collapsedSections (object), collapsedFolders (Set)}. Returns {sections: [{id, title, icon, open,
+   * count, rows, emptyText}], summary}.
+   */
+  function sidebarModel({ refs, status: st, stashes, stashError, worktrees, worktreeDirty, currentDirty }, { filter = '', collapsedSections = {}, collapsedFolders = new Set() } = {}) {
     const matches = (text) => !filter || String(text || '').toLowerCase().includes(filter);
     const isFolderOpen = (key) => !!filter || !collapsedFolders.has(key);
 
@@ -141,18 +185,23 @@
       icon: 'stash', badges: [], date: relTime(x.date, { short: true }),
     }));
 
+    // WORKTREES, in git's order (the main one first): matched by branch, path or short head
+    const wtList = (worktrees || []).filter((w) => matches(w.branch) || matches(w.path) || (w.head && matches(short(w.head))));
+    const wtRows = wtList.map((w) => worktreeDesc(w, w.current ? !!currentDirty : (worktreeDirty && worktreeDirty[w.path] === true)));
+
     const sec = (def, count, rows, emptyText) => ({
       id: def.id, title: def.title, icon: def.icon, open: !collapsedSections[def.id], count, rows,
       emptyText: filter ? 'No matches' : emptyText,
     });
-    const total = refs ? refs.local.length + refs.remote.length + refs.tags.length + (stashes || []).length : 0;
-    const shown = localRefs.length + remoteRefs.length + tagRefs.length + stashList.length;
+    const total = (refs ? refs.local.length + refs.remote.length + refs.tags.length + (stashes || []).length : 0) + (worktrees || []).length;
+    const shown = localRefs.length + remoteRefs.length + tagRefs.length + stashList.length + wtList.length;
     return {
       sections: [
         sec(SECTIONS[0], localRefs.length + (unbornShown ? 1 : 0), local, 'No branches'),
         sec(SECTIONS[1], remoteRefs.length, remote, 'No remote branches'),
         sec(SECTIONS[2], tagRefs.length, tags, 'No tags'),
         sec(SECTIONS[3], stashList.length, stashRows, stashError ? `Couldn’t read stashes: ${displayName(stashError)}` : 'No stashes'),
+        sec(SECTIONS[4], wtRows.length, wtRows, worktrees ? 'No worktrees' : 'Reading worktrees…'),
       ],
       summary: filter ? `Viewing ${shown} of ${total}` : '',
     };
@@ -168,11 +217,12 @@
   // Components.actions (renderer/actions.js) loads before the components; node tests that load this
   // script alone get a fresh copy bound to their window (util.load).
   const A = util.load('Components.actions', './actions.js');
-  const { flowsOf, runFlow, toMenuItems, bindContextMenu, bareBlocked } = A;
+  const { flowsOf, runFlow, toMenuItems, bindContextMenu, bareBlocked, FREE_FLOWS } = A;
 
   /**
    * The item/action target behind sidebar row `key`: {kind: 'local'|'tag', name, oid, current} |
-   * {kind: 'remote', name, oid, current: false, remote} | {kind: 'stash', entry} | null.
+   * {kind: 'remote', name, oid, current: false, remote} | {kind: 'stash' | 'worktree', entry} | null
+   * (a worktree: the state.worktrees entry of exactly that path).
    */
   function rowTarget(key, state) {
     const refs = state && state.refs;
@@ -192,6 +242,10 @@
       const entry = ((state && state.stashes) || []).find((s) => s.hash === name);
       return entry ? { kind, entry } : null;
     }
+    if (kind === 'worktree') {
+      const entry = ((state && state.worktrees) || []).find((w) => w.path === name);
+      return entry ? { kind, entry } : null;
+    }
     return null;
   }
 
@@ -205,22 +259,26 @@
   const stashMenuItems = (entry, state, flows = flowsOf()) => A.stashMenuItems(entry, state, flows);
 
   /** The descriptor a double-click on target would run (before the busy / bare checks), or null. */
-  function doubleClickDesc(target) {
+  function doubleClickDesc(target, state) {
     if (target.kind === 'local') return target.current ? null : { flow: 'checkout', args: [{ target: target.name, kind: 'local' }] };
     if (target.kind === 'remote') return { flow: 'checkout', args: [{ target: target.name, kind: 'remote' }] };
     if (target.kind === 'stash') return { flow: 'stashApply', args: [target.entry.hash] };
+    if (target.kind === 'worktree') return A.worktreeRefusal(target.entry, 'open', state) ? null : { flow: 'openWorktree', args: [target.entry.path] };
     return null;
   }
 
   /**
-   * The descriptor a double-click on target runs, or null (current branch, tags, busy, and every
-   * target in a bare repository: checkout and apply need a working tree, Components.actions.bareBlocked).
-   * While a rebase / merge / … is in progress the flow itself refuses with the reason (PLPolicy.opBlocked).
+   * The descriptor a double-click (or Enter on a worktree row) on target runs, or null (current branch,
+   * tags, a worktree that can't be opened (worktreeRefusal), busy unless the flow runs while busy
+   * (openWorktree), and checkout / apply in a bare repository: they need a working tree,
+   * Components.actions.bareBlocked). While a rebase / merge / … is in progress the flow itself refuses
+   * with the reason (PLPolicy.opBlocked).
    */
   function doubleClickAction(target, state) {
-    if (!target || (state && state.busy)) return null;
-    const d = doubleClickDesc(target);
-    return d && !bareBlocked(state, d.flow, d.args) ? d : null;
+    if (!target) return null;
+    const d = doubleClickDesc(target, state);
+    if (!d || (state && state.busy && !FREE_FLOWS.has(d.flow))) return null;
+    return bareBlocked(state, d.flow, d.args) ? null : d;
   }
 
   // ------------------------------------------------------------------ multi-selection (pure)
@@ -292,6 +350,7 @@
   /** Menu descriptors for a target (rowTarget result). */
   const targetMenuItems = (target, state, flows = flowsOf()) => {
     if (!target) return [];
+    if (target.kind === 'worktree') return A.worktreeMenuItems(target.entry, state, flows);
     return target.kind === 'stash' ? stashMenuItems(target.entry, state, flows) : branchMenuItems(target, state, flows);
   };
 
@@ -309,6 +368,9 @@
       let selecting = false; // selectRow is changing the store's selection (not the graph)
       let lastRepoRoot = null;
       let lastSig = null; // JSON of the model the DOM shows
+      const isDirty = (st) => (typeof store.isDirty === 'function' ? store.isDirty(st) : false);
+      /** The worktrees' dirty dots are read only while their section is open. */
+      const wantDirty = (on) => { if (typeof store.actions.setWorktreeDirtyWanted === 'function') store.actions.setWorktreeDirtyWanted(on); };
 
       function loadFolders(repoRoot) {
         collapsedFolders.clear();
@@ -323,7 +385,7 @@
       input.type = 'search';
       input.placeholder = `Filter (${A.keyHint({ key: 'f', alt: true })})`;
       input.spellcheck = false;
-      input.setAttribute('aria-label', 'Filter branches, tags and stashes');
+      input.setAttribute('aria-label', 'Filter branches, tags, stashes and worktrees');
       const clear = el('button', 'sb-filter-clear');
       clear.type = 'button';
       clear.title = 'Clear filter (Esc)';
@@ -355,6 +417,7 @@
         const twisty = el('span', 'sb-twisty');
         const ic = el('span', 'sb-icon');
         r.append(twisty, ic, el('span', 'sb-name', displayName(d.label)));
+        if (d.sub) r.append(el('span', 'sb-sub', displayName(d.sub)));
         if (d.kind === 'folder') {
           r.dataset.toggle = d.toggle;
           r.setAttribute('aria-expanded', String(d.expanded));
@@ -364,7 +427,11 @@
         } else if (d.icon) ic.append(icon(d.icon, 13));
         if (d.badges.length) {
           const badges = el('span', 'sb-badges');
-          for (const b of d.badges) badges.append(el('span', b.cls, b.text));
+          for (const b of d.badges) {
+            const span = el('span', b.cls, b.text);
+            if (b.icon) span.append(icon(b.icon, 11));
+            badges.append(span);
+          }
           r.append(badges);
         }
         if (d.date !== undefined) r.append(el('span', 'sb-date', d.date));
@@ -405,7 +472,10 @@
       function render() {
         const s = store.state;
         const model = sidebarModel(
-          { refs: s.refs, status: s.status, stashes: s.stashes, stashError: s.stashError },
+          {
+            refs: s.refs, status: s.status, stashes: s.stashes, stashError: s.stashError,
+            worktrees: s.worktrees, worktreeDirty: s.worktreeDirty, currentDirty: isDirty(s.status),
+          },
           { filter, collapsedSections, collapsedFolders },
         );
         const sig = JSON.stringify(model);
@@ -465,6 +535,7 @@
         if (now) delete collapsedSections[id];
         else collapsedSections[id] = true;
         storage.set(LS_SECTIONS, collapsedSections);
+        if (id === WORKTREES) wantDirty(now);
         render();
       }
       function toggleFolder(key, open) {
@@ -534,11 +605,14 @@
         const r = e.target.closest && e.target.closest('.sb-row');
         return r && list.contains(r) ? r : null;
       };
-      function onDblClick(e) {
-        const r = rowOf(e);
-        if (!r) return;
+      /** Run the double-click action of row r (the row's target), if it has one. */
+      function runRow(r) {
         const d = doubleClickAction(rowTarget(r.dataset.key, store.state), store.state);
         if (d) runFlow(d, store);
+      }
+      function onDblClick(e) {
+        const r = rowOf(e);
+        if (r) runRow(r);
       }
       list.addEventListener('dblclick', onDblClick);
 
@@ -628,6 +702,12 @@
           case 'End': move(items.length - 1); break;
           case 'Enter':
           case ' ':
+            if (cur && cur.dataset.kind === 'worktree') {
+              focusKey = cur.dataset.key;
+              updateRoving();
+              runRow(cur); // open it (a worktree has no commit to select)
+              break;
+            }
             activate(cur);
             if (rowsByKey.get(focusKey)) rowsByKey.get(focusKey).focus();
             break;
@@ -695,11 +775,12 @@
       }
       document.addEventListener('keydown', onDocKey, true);
 
-      // The sidebar shows only the branch and HEAD oid from status (unborn branch row): other status
-      // changes (every edit in the working tree) don't even build the model.
-      const statusKey = (st) => (st ? `${st.branch || ''}:${st.oid || ''}` : '');
+      // The sidebar shows only the branch and HEAD oid from status (unborn branch row) and whether the
+      // tree is dirty (the current worktree's dot): other status changes (most edits in the working
+      // tree) don't even build the model.
+      const statusKey = (st) => (st ? `${st.branch || ''}:${st.oid || ''}:${isDirty(st) ? 1 : 0}` : '');
       let lastStatusKey = statusKey(store.state.status);
-      const off = store.subscribe(['refs', 'stashes', 'stashError', 'status', 'selection', 'repo'], (s, changed) => {
+      const off = store.subscribe(['refs', 'stashes', 'stashError', 'status', 'selection', 'repo', 'worktrees', 'worktreeDirty'], (s, changed) => {
         const repoRoot = s.repo && s.repo.root;
         const sk = statusKey(s.status);
         const statusMoved = sk !== lastStatusKey;
@@ -730,9 +811,11 @@
       lastRepoRoot = store.state.repo && store.state.repo.root;
       loadFolders(lastRepoRoot);
       render();
+      wantDirty(!collapsedSections[WORKTREES]);
 
       return () => {
         off();
+        wantDirty(false);
         document.removeEventListener('keydown', onDocKey, true);
         list.removeEventListener('click', onClick);
         list.removeEventListener('mousedown', onMouseDown);
@@ -746,7 +829,7 @@
   });
 
   if (typeof module !== 'undefined') module.exports = {
-    sidebarModel, buildTree, rowTarget, branchMenuItems, stashMenuItems, doubleClickAction,
+    sidebarModel, buildTree, rowTarget, branchMenuItems, stashMenuItems, doubleClickAction, targetMenuItems,
     nextSelection, selectedBranches, selectionMenuItems, folderBranches, folderMenuItems,
   };
 })();
