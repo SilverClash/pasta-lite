@@ -341,36 +341,38 @@
   }
 
   const dn = displayName;
-  const WT_MAIN = "The main worktree can't be locked";
 
   /**
-   * Why worktree `w` (a state.worktrees entry) can't take `action` ('open', 'reveal', 'lock', 'unlock',
-   * 'delete' or 'prune'), or null: {title} (display-safe). The renderer's mirror of main's safety
-   * checks (main re-checks them). `state` is unused for now; it keeps the signature of deleteRefusal.
+   * Why worktree `w` (a state.worktrees entry) can't take `action` ('open', 'reveal', 'lock', 'unlock'
+   * or 'delete'), or null: {title} (display-safe). The renderer's mirror of main's safety checks (main
+   * re-checks them; a rebase or merge in progress there is refused by main alone: worktree-busy).
+   * `missing` (the folder is gone; git marks only unlocked ones prunable) counts like prunable for
+   * Open and Reveal. `state` is unused for now; it keeps the signature of deleteRefusal.
    */
   function worktreeRefusal(w, action, state) { // eslint-disable-line no-unused-vars
     if (!w) return null;
-    const main = !!(w.main || w.bare);
+    const gone = !!(w.prunable || w.missing);
     switch (action) {
       case 'open':
         if (w.current) return { title: 'This tab has this worktree open' };
         if (w.bare) return { title: 'The bare repository has no working tree to open' };
         if (w.prunable) return { title: 'Its folder is gone: prune it' };
+        if (w.missing) return { title: 'Its folder is gone' };
         return null;
       case 'reveal':
-        return w.prunable ? { title: 'Its folder is gone' } : null;
+        return gone ? { title: 'Its folder is gone' } : null;
       case 'lock':
       case 'unlock':
-        return main ? { title: WT_MAIN } : null;
+        if (w.bare) return { title: 'The bare repository has no worktree folder to lock' };
+        return w.main ? { title: "The main worktree can't be locked" } : null;
       case 'delete':
         if (w.bare) return { title: "The bare repository can't be deleted here" };
         if (w.main) return { title: "The main worktree can't be deleted" };
         if (w.current) return { title: 'This tab has this worktree open: open another worktree and delete it from there' };
         if (w.locked) return { title: `Locked${w.lockReason ? ` (${dn(w.lockReason)})` : ''}: unlock it first` };
         if (w.prunable) return { title: 'Its folder is already gone: use Prune' };
+        if (w.missing) return { title: 'Its folder is gone: use Prune' };
         return null;
-      case 'prune':
-        return w.locked ? { title: 'Locked: git keeps locked worktrees. Unlock it first' } : null;
       default:
         return null;
     }
@@ -398,7 +400,7 @@
         ? { label: 'Unlock', flow: 'unlockWorktree', args: [w.path] }
         : { label: 'Lock…', flow: 'lockWorktree', args: [w.path] }, worktreeRefusal(w, w.locked ? 'unlock' : 'lock', state)),
     ];
-    if (w.prunable) items.push(off({ label: 'Prune…', flow: 'pruneWorktrees', args: [] }, worktreeRefusal(w, 'prune', state)));
+    if (w.prunable) items.push({ label: 'Prune…', flow: 'pruneWorktrees', args: [] });
     items.push({ separator: true }, off({ label: 'Delete…', flow: 'removeWorktree', args: [w.path], danger: true }, worktreeRefusal(w, 'delete', state)));
     return finish(items, state || {}, flows);
   }

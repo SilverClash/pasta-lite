@@ -14,13 +14,14 @@
 //   repo         {root, name, head:{sha, branch}, bare} | null   bare: a bare repository, whose status is
 //                main's synthetic clean one, so there is no WIP row and the selection falls back to HEAD
 //   worktrees    ops 'worktrees' result [{path, head, branch, bare, detached, locked, lockReason, prunable,
-//                prunableReason, main, current}] | null until first read; read for every repository with
-//                every full refresh (the last list is kept when reading fails)
+//                prunableReason, missing, main, current}] | null until first read; read for every repository
+//                with every full refresh (the last list is kept when reading fails)
 //   worktreeDirty {[path]: true | false | null} | null: whether each linked worktree (not bare, not prunable,
-//                not current) has changes; null for one main couldn't check. Read lazily, only while
-//                wanted (actions.setWorktreeDirtyWanted: the sidebar's Worktrees section is open), with
-//                each worktrees read, at most once per DIRTY_TTL_MS for the same paths
-//                (actions.loadWorktreeDirty({force}) skips that); the last value is kept when reading
+//                not missing, not current) has changes; null for one main couldn't check. Read lazily,
+//                only while wanted (actions.setWorktreeDirtyWanted: the sidebar's Worktrees section is
+//                open), with each worktrees read, at most once per DIRTY_TTL_MS (from the end of the
+//                last read) for the same paths and never while a read of them is still running
+//                (actions.loadWorktreeDirty({force}) skips both); the last value is kept when reading
 //                fails. The current worktree is absent: use store.isDirty().
 //   status       git.status() result | null
 //   refs         git.refs() result | null
@@ -272,6 +273,7 @@
       watchNoticed = null;
       dirtyAt = 0;
       dirtyKey = '';
+      dirtyInFlight = null;
       set({
         repo, loading: true, status: null, refs: null, refsBySha: new Map(), stashes: [], stashError: null,
         commits: [], hasMore: false, next: null, rows: [], graph: { width: 0, rows: [] }, selection: null,
@@ -551,40 +553,49 @@
     const DIRTY_TTL_MS = 5000;
     let dirtyWanted = false; // the sidebar's Worktrees section is open
     let dirtySeq = 0; // latest dirty read; an older one never lands after it
-    let dirtyAt = 0; // when the last dirty read for dirtyKey started
+    let dirtyAt = 0; // when the last dirty read for dirtyKey finished (0: none, or it failed)
     let dirtyKey = ''; // JSON of the sorted paths that read checked
+    let dirtyInFlight = null; // {key, promise} of the dirty read still running, else null
 
     /**
      * Re-read state.worktreeDirty (ops worktreeDirty) unless the same linked worktrees were checked
-     * < DIRTY_TTL_MS ago; never rejects.
+     * < DIRTY_TTL_MS ago or are being checked right now (that read's promise is returned, so a slow
+     * read is never overlapped by another for the same paths); `force` skips both. Never rejects.
      */
-    async function loadWorktreeDirty({ force = false } = {}) {
-      if (!state.repo || !Array.isArray(state.worktrees)) return;
-      const paths = state.worktrees.filter((w) => !w.bare && !w.prunable && !w.current).map((w) => w.path).sort();
+    function loadWorktreeDirty({ force = false } = {}) {
+      if (!state.repo || !Array.isArray(state.worktrees)) return Promise.resolve();
+      const paths = state.worktrees.filter((w) => !w.bare && !w.prunable && !w.missing && !w.current).map((w) => w.path).sort();
       const key = JSON.stringify(paths);
       if (!paths.length) {
         dirtySeq++; // an older read must not land over this
+        dirtyInFlight = null;
         dirtyKey = key;
         dirtyAt = Date.now();
         if (!sameJSON(state.worktreeDirty, {})) set({ worktreeDirty: {} });
-        return;
+        return Promise.resolve();
       }
-      if (!force && key === dirtyKey && Date.now() - dirtyAt < DIRTY_TTL_MS) return;
+      if (!force && dirtyInFlight && dirtyInFlight.key === key) return dirtyInFlight.promise;
+      if (!force && key === dirtyKey && Date.now() - dirtyAt < DIRTY_TTL_MS) return Promise.resolve();
       const seq = loadSeq;
       const mine = ++dirtySeq;
       dirtyKey = key;
-      dirtyAt = Date.now();
-      const list = await invoke('worktreeDirty').then((l) => (Array.isArray(l) ? l : []), (e) => {
-        logError('[store] could not read the worktrees\' state:', e);
-        return null;
-      });
-      if (!list || seq !== loadSeq || mine !== dirtySeq) {
-        if (!list && seq === loadSeq && mine === dirtySeq) dirtyAt = 0; // a failure: the next read retries
-        return;
-      }
-      const dirty = {};
-      for (const e of list) if (e && typeof e.path === 'string') dirty[e.path] = e.dirty === true || e.dirty === false ? e.dirty : null;
-      if (!sameJSON(state.worktreeDirty, dirty)) set({ worktreeDirty: dirty });
+      dirtyAt = 0;
+      const flight = { key, promise: null };
+      flight.promise = (async () => {
+        const list = await invoke('worktreeDirty').then((l) => (Array.isArray(l) ? l : []), (e) => {
+          logError('[store] could not read the worktrees\' state:', e);
+          return null;
+        });
+        if (dirtyInFlight === flight) dirtyInFlight = null;
+        if (seq !== loadSeq || mine !== dirtySeq) return;
+        if (!list) return; // a failure: dirtyAt stays 0, so the next read retries
+        dirtyAt = Date.now();
+        const dirty = {};
+        for (const e of list) if (e && typeof e.path === 'string') dirty[e.path] = e.dirty === true || e.dirty === false ? e.dirty : null;
+        if (!sameJSON(state.worktreeDirty, dirty)) set({ worktreeDirty: dirty });
+      })();
+      dirtyInFlight = flight;
+      return flight.promise;
     }
 
     /** The sidebar's Worktrees section opened (true) or closed: the dirty dots are read only while it is open. */

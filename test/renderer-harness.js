@@ -569,6 +569,7 @@ function scriptedApi(data, handlers = {}) {
     status: () => data.status, refs: () => data.refs, stashes: () => data.stashes,
     undoState: () => data.undoState, log: () => data.log, remotes: () => data.remotes || ['origin'],
     commitFiles: () => [], worktrees: () => data.worktrees || [], worktreeDirty: () => data.worktreeDirty || [],
+    worktreeUnreachable: () => data.worktreeUnreachable || { count: 0 },
   };
   const run = (op, args, opId) => {
     calls.push({ op, args, opId });

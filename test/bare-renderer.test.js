@@ -307,6 +307,7 @@ test('bannerModel: a bare repository gets its banner with one "Open worktree" bu
     { path: '/w/myproject/main', head: SHA('a'), branch: 'main', bare: false, detached: false, locked: false, prunable: false },
     { path: '/w/myproject/review', head: SHA('e'), branch: null, bare: false, detached: true, locked: true, prunable: false },
     { path: '/w/gone', head: SHA('b'), branch: 'old', bare: false, detached: false, locked: false, prunable: true },
+    { path: '/w/usb', head: SHA('b'), branch: 'usb', bare: false, detached: false, locked: true, prunable: false, missing: true },
   ];
   const m = Op.bannerModel(state({ worktrees }));
   assert.equal(m.kind, 'bare');

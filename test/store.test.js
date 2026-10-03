@@ -1220,6 +1220,57 @@ test('worktreeDirty: read only while wanted; a 5 s TTL for the same paths; force
   assert.equal(api.count('worktreeDirty'), 5, 'not wanted any more: not read');
 });
 
+test('worktreeDirty: a read still running when the TTL expires is shared, not overlapped; the TTL counts from its end', async (t) => {
+  let now = 1_000_000;
+  t.mock.method(Date, 'now', () => now);
+  const list = [MAIN_WT, WT('/w/a')];
+  const { api, store } = await withWorktrees(list);
+  store.actions.setWorktreeDirtyWanted(true);
+  assert.equal(api.count('worktreeDirty'), 1);
+  const slow = api.take('worktreeDirty');
+
+  // the read is still running 6 s later: refreshes and explicit loads share it
+  now += 6000;
+  await fullRefresh(api, store);
+  api.take('worktrees').resolve(list);
+  await flush();
+  const shared = store.actions.loadWorktreeDirty();
+  store.actions.setWorktreeDirtyWanted(true);
+  assert.equal(api.count('worktreeDirty'), 1, 'no second read while the first is in flight');
+  slow.resolve([{ path: '/w/a', dirty: true }]);
+  await shared;
+  assert.deepEqual(store.state.worktreeDirty, { '/w/a': true }, 'the shared promise settles with the read');
+
+  // the TTL counts from the end of the read: 4.9 s later, still fresh
+  now += 4900;
+  await store.actions.loadWorktreeDirty();
+  assert.equal(api.count('worktreeDirty'), 1, 'within 5 s of the read finishing');
+  now += 100;
+  store.actions.loadWorktreeDirty();
+  assert.equal(api.count('worktreeDirty'), 2, '5 s after it finished: re-read');
+  api.take('worktreeDirty').resolve([{ path: '/w/a', dirty: false }]);
+  await flush();
+});
+
+test('worktreeDirty: missing entries (their folder is gone) are not checked', async () => {
+  const { api, store } = await withWorktrees([MAIN_WT, WT('/w/a'), WT('/w/away', { locked: true, missing: true })]);
+  store.actions.setWorktreeDirtyWanted(true);
+  assert.equal(api.count('worktreeDirty'), 1);
+  api.take('worktreeDirty').resolve([{ path: '/w/a', dirty: false }, { path: '/w/away', dirty: null }]);
+  await flush();
+  // the list loses the missing entry: the same checkable paths, so no re-read within the TTL
+  await fullRefresh(api, store);
+  api.take('worktrees').resolve([MAIN_WT, WT('/w/a')]);
+  await flush();
+  assert.equal(api.count('worktreeDirty'), 1, 'the checkable-paths key excludes missing entries');
+
+  const only = await withWorktrees([MAIN_WT, WT('/w/away', { missing: true })]);
+  only.store.actions.setWorktreeDirtyWanted(true);
+  await flush();
+  assert.deepEqual(only.store.state.worktreeDirty, {});
+  assert.equal(only.api.count('worktreeDirty'), 0, 'only missing ones: nothing to read');
+});
+
 test('worktreeDirty: with only the current (and bare or prunable) entries there is nothing to check: {} with no read', async () => {
   const { api, store } = await withWorktrees([MAIN_WT, WT('/w/gone', { prunable: true })]);
   store.actions.setWorktreeDirtyWanted(true);

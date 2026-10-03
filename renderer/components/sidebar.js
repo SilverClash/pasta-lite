@@ -9,8 +9,9 @@
 // WORKTREES lists git's worktrees of the repository (store worktrees, in git's order): the one this
 // tab shows is highlighted, a dot marks uncommitted changes (store worktreeDirty, read only while the
 // section is open: actions.setWorktreeDirtyWanted; the current one's from store.isDirty()).
-// Double-click or Enter opens another worktree (flow openWorktree), and its context menu is
-// Components.actions.worktreeMenuItems (open, reveal, copy path, lock / unlock, prune, delete).
+// Double-click or Enter opens another worktree (flow openWorktree; Space and a click only focus it, and
+// end a branch multi-selection), and its context menu is Components.actions.worktreeMenuItems (open,
+// reveal, copy path, lock / unlock, prune, delete). The filter matches its branch, folder name or head.
 // Collapsed sections persist in localStorage (global), collapsed folders per repository. Git data goes
 // through textContent only, via util.displayName (bidi/control characters shown as escapes).
 (function () {
@@ -93,12 +94,13 @@
   const remoteDesc = refDesc('remote');
   const tagDesc = refDesc('tag');
 
-  /** The last component of a path ('/' or '\\' separated), trailing separators ignored. */
-  const fsBaseName = (p) => String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || String(p || '');
+  /** The last component of a path ('/' or '\\' separated), trailing separators ignored (PLOp.fsBaseName). */
+  const fsBaseName = (p) => window.PLOp.fsBaseName(p);
 
   /**
    * The row of state.worktrees entry `w`. dirty: true (the dot) | false | null (unknown); `current`
-   * is the tab's own worktree (decided in main, the renderer never compares paths).
+   * is the tab's own worktree (decided in main, the renderer never compares paths). `missing`: its
+   * folder is gone (git marks only an unlocked one prunable; a locked one keeps its lock badge).
    */
   function worktreeDesc(w, dirty) {
     const detached = !w.bare && !w.branch;
@@ -112,15 +114,16 @@
     const badges = [];
     if (w.main) badges.push({ cls: 'sb-note sb-wt-main', text: 'main' });
     if (w.locked) badges.push({ cls: 'sb-wt-locked', icon: 'lock', text: '' });
-    if (w.prunable) badges.push({ cls: 'sb-gone', text: 'missing' });
+    const gone = !!(w.prunable || w.missing);
+    if (gone) badges.push({ cls: 'sb-gone', text: 'missing' });
     if (dirty === true) badges.push({ cls: 'sb-dirty', text: '●' });
     const lines = [displayName(w.path), what];
     if (w.main) lines.push(w.bare ? 'The repository itself' : 'Main worktree');
     if (w.current) lines.push('Open in this tab');
     if (w.locked) lines.push(`Locked${w.lockReason ? `: ${displayName(w.lockReason)}` : ''}`);
-    if (w.prunable) lines.push(`Folder missing${w.prunableReason ? `: ${displayName(w.prunableReason)}` : ''}`);
+    if (gone) lines.push(`Folder missing${w.prunable && w.prunableReason ? `: ${displayName(w.prunableReason)}` : ''}`);
     if (dirty === true) lines.push('Has uncommitted changes');
-    const cls = [w.current && 'current', w.prunable && 'sb-wt-prunable', detached && 'detached'].filter(Boolean).join(' ');
+    const cls = [w.current && 'current', gone && 'sb-wt-prunable', detached && 'detached'].filter(Boolean).join(' ');
     return {
       key: `worktree:${w.path}`, kind: 'worktree', level: 0, label, sub: sub === label ? '' : sub, sha: null,
       title: lines.join('\n'), cls, icon: w.current ? 'home' : (detached ? 'detached' : 'worktree'), badges,
@@ -185,8 +188,9 @@
       icon: 'stash', badges: [], date: relTime(x.date, { short: true }),
     }));
 
-    // WORKTREES, in git's order (the main one first): matched by branch, path or short head
-    const wtList = (worktrees || []).filter((w) => matches(w.branch) || matches(w.path) || (w.head && matches(short(w.head))));
+    // WORKTREES, in git's order (the main one first): matched by branch, folder name or short head
+    // (not the whole path, whose parent folders would match every row)
+    const wtList = (worktrees || []).filter((w) => matches(w.branch) || matches(fsBaseName(w.path)) || (w.head && matches(short(w.head))));
     const wtRows = wtList.map((w) => worktreeDesc(w, w.current ? !!currentDirty : (worktreeDirty && worktreeDirty[w.path] === true)));
 
     const sec = (def, count, rows, emptyText) => ({
@@ -574,6 +578,12 @@
           multi = nextSelection(multi, r.dataset.key, selectableKeys());
           selectRow(r);
           updateRoving();
+        } else if (kind === 'worktree') {
+          // a worktree has no commit to select: like a plain click on any other row, it ends a
+          // multi-selection (the row of the selected commit is highlighted again)
+          multi = { keys: new Set(), anchor: null };
+          updateSelection();
+          updateRoving();
         } else updateRoving();
       }
 
@@ -702,7 +712,8 @@
           case 'End': move(items.length - 1); break;
           case 'Enter':
           case ' ':
-            if (cur && cur.dataset.kind === 'worktree') {
+            // Enter opens a worktree (as double-click does); Space only focuses it, as on other rows
+            if (e.key === 'Enter' && cur && cur.dataset.kind === 'worktree') {
               focusKey = cur.dataset.key;
               updateRoving();
               runRow(cur); // open it (a worktree has no commit to select)

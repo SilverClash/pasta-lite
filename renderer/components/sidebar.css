@@ -59,7 +59,7 @@
 
 /* ref rows */
 .sb-ref .sb-name { color: var(--text); }
-.sb-ref.selected, .sb-stash.selected, .sb-worktree.selected { background: var(--blue-select); }
+.sb-ref.selected, .sb-stash.selected { background: var(--blue-select); }
 .sb-ref.selected .sb-name, .sb-stash.selected .sb-name { color: var(--text-strong); }
 .sb-ref.current { background: color-mix(in srgb, var(--green) 14%, transparent); }
 .sb-ref.current::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--green); }

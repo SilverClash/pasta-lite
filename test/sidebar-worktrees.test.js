@@ -115,6 +115,12 @@ test('sidebarModel: worktree rows: current (home icon, highlighted), main, detac
   const u = rowOf(m, '/w/new');
   assert.deepEqual([u.label, u.title], ['no commits', '/w/new\nNo commits yet']);
 
+  // missing (git never marks a locked worktree prunable): the missing badge after its lock
+  const away = rowOf(sidebarModel({ worktrees: [wt({ path: '/w/away', branch: 'away', locked: true, lockReason: 'usb', missing: true })] }), '/w/away');
+  assert.equal(away.cls, 'sb-wt-prunable');
+  assert.deepEqual(away.badges, [{ cls: 'sb-wt-locked', icon: 'lock', text: '' }, { cls: 'sb-gone', text: 'missing' }]);
+  assert.equal(away.title, '/w/away\nBranch away\nLocked: usb\nFolder missing');
+
   // a current detached worktree keeps the home icon; locked without a reason
   const m2 = sidebarModel({ worktrees: [wt({ path: '/d', current: true, locked: true })] });
   assert.deepEqual([rowOf(m2, '/d').icon, rowOf(m2, '/d').cls], ['home', 'current detached']);
@@ -137,12 +143,15 @@ test('sidebarModel: the dirty dot: the current worktree from currentDirty, the o
   assert.equal(dirtyOf(m3, '/r'), false, 'the current one never reads worktreeDirty');
 });
 
-test('sidebarModel: the filter matches branch, path or short head; counts and the "Viewing" totals include worktrees', () => {
+test('sidebarModel: the filter matches branch, folder name or short head; counts and the "Viewing" totals include worktrees', () => {
   const { mod: { sidebarModel } } = loadSidebar();
   const data = { refs: REFS(), stashes: [], worktrees: WTS };
   const keys = (filter) => wtSection(sidebarModel(data, { filter })).rows.map((r) => r.key.slice('worktree:'.length));
-  assert.deepEqual(keys('feat'), ['/w/feat-x'], 'branch and path');
-  assert.deepEqual(keys('/w/'), ['/w/feat-x', '/w/detached', '/w/usb', '/w/gone'], 'path');
+  assert.deepEqual(keys('feat'), ['/w/feat-x'], 'branch and folder name');
+  assert.deepEqual(keys('feat-x'), ['/w/feat-x'], 'folder name');
+  assert.deepEqual(keys('gone'), ['/w/gone'], 'folder name (its branch is old)');
+  assert.deepEqual(keys('/w/'), [], 'not the parent folders of the path');
+  assert.deepEqual(keys('w'), [], 'a parent folder name alone matches nothing');
   assert.deepEqual(keys('ccccccc'), ['/w/detached'], 'short head');
   assert.deepEqual(keys(SHA('c')), [], 'not the full head');
   assert.deepEqual(keys('usb'), ['/w/usb']);
@@ -333,7 +342,7 @@ test('mounted sidebar: the current worktree\'s dot follows the working tree (sta
   assert.equal(t.wrow('/r').querySelector('.sb-dirty'), null, 'clean again');
 });
 
-test('mounted sidebar: double-click and Enter / Space open a worktree; refused ones do nothing; a click selects no commit', async (tc) => {
+test('mounted sidebar: double-click and Enter open a worktree, Space does not; refused ones do nothing; a click selects no commit', async (tc) => {
   const t = await mountSidebar(tc);
   await t.answerWorktrees();
   const sel = t.store.state.selection;
@@ -350,17 +359,19 @@ test('mounted sidebar: double-click and Enter / Space open a worktree; refused o
   const e = t.dom.key('Enter');
   assert.equal(e.defaultPrevented, true);
   t.wrow('/w/usb').focus();
-  t.dom.key(' ');
+  const sp = t.dom.key(' ');
+  assert.equal(sp.defaultPrevented, true, 'Space is handled (no page scroll), as on other rows');
+  assert.equal(t.dom.doc.activeElement, t.wrow('/w/usb'));
   t.wrow('/r').focus();
   t.dom.key('Enter');
   await H.flush();
-  assert.deepEqual(calls(t.flows), [['openWorktree', '/w/feat-x'], ['openWorktree', '/w/detached'], ['openWorktree', '/w/usb']]);
+  assert.deepEqual(calls(t.flows), [['openWorktree', '/w/feat-x'], ['openWorktree', '/w/detached']], 'Space opens nothing');
   assert.equal(t.dom.doc.activeElement, t.wrow('/r'), 'the focus stays');
 
   t.store.set({ busy: true });
   t.dom.dispatch(t.wrow('/w/feat-x'), 'dblclick');
   await H.flush();
-  assert.equal(t.flows.calls.length, 4, 'openWorktree runs while busy');
+  assert.equal(t.flows.calls.length, 3, 'openWorktree runs while busy');
 });
 
 test('mounted sidebar: right-click / ContextMenu key on a worktree row opens worktreeMenuItems; its items run the flows', async (tc) => {
@@ -397,8 +408,6 @@ test('mounted sidebar: arrows walk from local branches into the worktree rows; m
   await H.flush();
   t.dom.dispatch(t.row('local:usb').querySelector('.sb-name'), 'click', mod);
   assert.deepEqual(selected(), ['local:feat/x', 'local:usb']);
-  t.dom.dispatch(t.wrow('/w/feat-x').querySelector('.sb-name'), 'click', mod); // not selectable: a plain activation
-  assert.deepEqual(selected(), ['local:feat/x', 'local:usb'], 'worktree rows never join the selection');
   t.dom.dispatch(t.row('local:usb'), 'contextmenu', { clientX: 1, clientY: 1 });
   assert.deepEqual(labels(t.menu.opened.at(-1).items), ['Delete 2 branches']);
 
@@ -418,6 +427,23 @@ test('mounted sidebar: arrows walk from local branches into the worktree rows; m
   t.dom.key('ArrowUp', { shiftKey: true });
   assert.equal(t.dom.doc.activeElement, t.wrow('/w/usb'));
   assert.deepEqual(selected(), ['local:feat/x', 'local:usb']);
+  // Space on a worktree row acts like a plain click on it (as Space does on other rows): it opens
+  // nothing and ends the multi-selection, back to the row of the selected commit
+  t.dom.key(' ');
+  assert.deepEqual(selected(), ['local:feat/x']);
+  assert.equal(t.flows.calls.length, 0);
+  assert.equal(t.dom.doc.activeElement, t.wrow('/w/usb'));
+
+  // a (⌘/Ctrl-)click on a worktree row never joins the selection: like a plain click elsewhere it
+  // ends it; no worktree row is ever highlighted
+  t.dom.dispatch(t.row('local:feat/x').querySelector('.sb-name'), 'click');
+  t.dom.dispatch(t.row('local:usb').querySelector('.sb-name'), 'click', mod);
+  assert.deepEqual(selected(), ['local:feat/x', 'local:usb']);
+  t.dom.dispatch(t.wrow('/w/feat-x').querySelector('.sb-name'), 'click', mod);
+  assert.deepEqual(selected(), ['local:feat/x'], 'the multi-selection ended');
+  assert.equal(t.dom.doc.activeElement, t.wrow('/w/feat-x'));
+  t.dom.dispatch(t.row('local:usb'), 'contextmenu', { clientX: 1, clientY: 1 });
+  assert.notDeepEqual(labels(t.menu.opened.at(-1).items), ['Delete 2 branches']);
 });
 
 test('mounted sidebar: the filter narrows the worktree rows and counts them in "Viewing"', async (tc) => {
