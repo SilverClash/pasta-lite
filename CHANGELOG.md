@@ -17,6 +17,13 @@ minor versions may contain breaking changes.
   the checked-out branch and branches checked out in other worktrees are left out. Branches that
   aren't fully merged can be force-deleted together, and any that fail are listed without stopping
   the rest. Undo restores the deleted branches one at a time, newest first.
+- Worktrees section in the sidebar. It lists every linked worktree with its branch or short SHA, marks
+  the main and current worktrees, and shows locked (with the reason), missing and dirty states; dirty
+  dots load while the section is open. Right-click a worktree to open it, reveal it in the file
+  manager, copy its path, lock or unlock it (with an optional reason), or delete it; **Prune** previews
+  what will be removed first. Deleting a worktree with changes asks for a force confirmation, and the
+  main, current and locked worktrees are never deleted. Changes made in a terminal show up
+  automatically.
 
 ### Fixed
 
