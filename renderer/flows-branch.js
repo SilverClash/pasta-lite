@@ -6,7 +6,8 @@
 //   deleteBranch(store, name)      refused (an alert) for the current branch and one checked out in a
 //                                   linked worktree (the worktrees re-read first)
 //   deleteBranches(store, names)   several local branches, one confirmation (the checked-out branch and
-//                                   branches of linked worktrees are left out, and the dialog says so)
+//                                   branches of linked worktrees are left out, and the dialog says so;
+//                                   more than DELETE_BRANCHES_MAX: an alert, no confirmation)
 // Shared by both: withWorktrees (the state with the worktrees re-read), confirmForce (the force-delete
 // question), and PLMenus.deleteRefusal (why a branch can't be deleted).
 //   branchNameError(name, refs) -> string | null   the create-branch validation (pure)
@@ -135,6 +136,8 @@
   }
 
   const branches = (n) => C.util.plural(n, 'branch', 'branches');
+  /** The most branches one deleteBranches write accepts (src/ops.js DELETE_BRANCHES_MAX). */
+  const DELETE_BRANCHES_MAX = 1000;
   /** Every name, one per line (display-safe): the dialog's detail box scrolls. */
   const nameList = (store, names) => dialog(store).pathListText(names, names.length);
 
@@ -207,6 +210,13 @@
       if (skipped.length) await dialog(store).alert({ title: 'Nothing to delete', message: skippedNote });
       return false;
     }
+    if (todo.length > DELETE_BRANCHES_MAX) {
+      await dialog(store).alert({
+        title: `Too many branches (${todo.length})`,
+        message: `At most ${DELETE_BRANCHES_MAX} branches can be deleted at once. Narrow the selection, or filter the sidebar first.`,
+      });
+      return false;
+    }
     const ok = await dialog(store).confirm({
       title: `Delete ${branches(todo.length)}?`,
       message: `Delete ${todo.length === 1 ? 'this local branch' : `these ${todo.length} local branches`}? Remote branches are not touched.`
@@ -229,15 +239,16 @@
     const failed = [...first.failed.filter((f) => f.kind !== 'not-merged'), ...forced.failed, ...forceFailed];
     const kept = force ? [] : unmerged;
     const warnings = deleted.filter((d) => d.warning).map((d) => `${dn(d.name)}: ${d.warning}`);
+    const done = deleted.length ? `Deleted ${branches(deleted.length)}` : 'No branches deleted';
     if (failed.length || warnings.length) {
       await dialog(store).alert({
-        title: failed.length ? `${branches(failed.length)} could not be deleted` : `Deleted ${branches(deleted.length)}`,
-        message: `Deleted ${branches(deleted.length)}${kept.length ? `, kept ${kept.length} not fully merged` : ''}.`
+        title: failed.length ? `${branches(failed.length)} could not be deleted` : done,
+        message: `${done}${kept.length ? `, kept ${kept.length} not fully merged` : ''}.`
           + `${failed.length ? ' Not deleted:' : ''}`,
         detail: [...failed.map((f) => `${dn(f.name)}: ${f.message}`), ...warnings].join('\n'),
       });
     } else {
-      store.actions.notify(`Deleted ${branches(deleted.length)}${kept.length ? ` (kept ${kept.length} not fully merged)` : ''}`);
+      store.actions.notify(`${done}${kept.length ? ` (kept ${kept.length} not fully merged)` : ''}`);
     }
     return deleted.length > 0;
   }

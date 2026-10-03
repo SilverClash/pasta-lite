@@ -34,7 +34,7 @@ const { kindError } = exec;
 // ---------------------------------------------------------------- registry
 
 const LOG_MAX = 10000;
-const DELETE_BRANCHES_MAX = 1000;
+const DELETE_BRANCHES_MAX = 1000; // the deleteBranches flow (renderer/flows-branch.js) checks the same cap
 
 /**
  * Record deleted branch `res` ({name, sha, upstream}) for undo; a failed record is reported
@@ -53,7 +53,7 @@ async function recorded(repo, res, at) {
 /** A name deleteBranches accepts before looking it up: a string that can't be read as an option or split a line. */
 function branchArg(v) {
   const n = str(v, 'name');
-  if (n.startsWith('-') || /[\0\n]/.test(n)) throw invalid(`Invalid name: '${n}'`);
+  if (!git.isPlainName(n)) throw invalid(`Invalid name: '${n}'`);
   return n;
 }
 

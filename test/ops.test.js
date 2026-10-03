@@ -220,6 +220,8 @@ test('deleteBranches: deletes what it can in one write, reports the rest; force;
   await runner.run(dir, 'checkout', ['main']);
   await assert.rejects(runner.run(dir, 'deleteBranches', [[]]), { kind: 'invalid-args' });
   await assert.rejects(runner.run(dir, 'deleteBranches', [['ok', '-D']]), { kind: 'invalid-args' });
+  await assert.rejects(runner.run(dir, 'deleteBranches', [['a\nb']]), { kind: 'invalid-args' });
+  await assert.rejects(runner.run(dir, 'deleteBranches', [Array.from({ length: 1001 }, (_, i) => `b${i}`)]), { kind: 'invalid-args' });
   events.length = 0;
   const res = await runner.run(dir, 'deleteBranches', [['chore/a', 'main', 'chore/wip', 'nope', 'chore/a']]);
   assert.deepEqual(res.deleted, [{ name: 'chore/a', sha: a, upstream: null }]);

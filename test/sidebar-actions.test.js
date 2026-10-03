@@ -1531,9 +1531,12 @@ test('mounted sidebar: Shift+ArrowUp/Down extends the range over local branch ro
   space(t.row('local:chore/a'));
   assert.deepEqual(t.selected(), ['local:chore/a'], 'the last one stays');
 
-  // on a folder row Shift+Arrow just moves the focus
+  // on a folder row Shift+Arrow just moves the focus, and ⌘/Ctrl+Space is left to the app
   const folder = t.row('dir:local:/feat');
   folder.focus();
+  const onFolder = space(folder);
+  assert.equal(onFolder.defaultPrevented, false);
+  assert.equal(onFolder.stopped, false);
   t.dom.key('ArrowDown', { shiftKey: true }, folder);
   assert.equal(t.dom.doc.activeElement, t.row('local:feat/x'));
   assert.deepEqual(t.selected(), ['local:chore/a']);

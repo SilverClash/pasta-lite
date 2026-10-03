@@ -575,7 +575,8 @@
       function selectionKey(e, cur) {
         if (e.altKey) return false;
         if (e.key === ' ' && util.modKey(e) && !e.shiftKey) {
-          if (isBranchRow(cur)) extendSelection(cur, { toggle: true });
+          if (!isBranchRow(cur)) return false; // elsewhere it's left to the app shortcuts
+          extendSelection(cur, { toggle: true });
           return true;
         }
         if ((e.key !== 'ArrowDown' && e.key !== 'ArrowUp') || !e.shiftKey || e.metaKey || e.ctrlKey) return false;

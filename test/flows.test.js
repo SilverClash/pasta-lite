@@ -2325,6 +2325,22 @@ test('deleteBranches: declining the force delete keeps the unmerged ones and say
   assert.deepEqual(notices(), ['Deleted 1 branch (kept 2 not fully merged)']);
 });
 
+test('deleteBranches: declining the force delete when nothing else was deleted says "No branches deleted"', async () => {
+  const fail = { 'chore/a': ['not-merged', 'x'], 'chore/b': ['not-merged', 'y'] };
+  const { F, store, notices } = await setup({ local: bulkLocal() }, { deleteBranches: bulkDelete(fail) }, [true, false]);
+  assert.equal(await F.deleteBranches(store, ['chore/a', 'chore/b']), false);
+  assert.deepEqual(notices(), ['No branches deleted (kept 2 not fully merged)']);
+});
+
+test('deleteBranches: more than the backend accepts in one write -> an alert before the confirmation, no write', async () => {
+  const local = [bulkLocal()[0], ...Array.from({ length: 1001 }, (_, i) => ({ name: `b${i}`, oid: 'b'.repeat(40), upstream: null, current: false }))];
+  const { F, store, api, dialogs } = await setup({ local }, { deleteBranches: bulkDelete() });
+  assert.equal(await F.deleteBranches(store, local.slice(1).map((b) => b.name)), false);
+  assert.deepEqual(dialogs.map((d) => [d.type, d.opts.title]), [['alert', 'Too many branches (1001)']]);
+  assert.match(dialogs[0].opts.message, /At most 1000 branches/);
+  assert.deepEqual(api.writes(), []);
+});
+
 test('deleteBranches: a branch checked out in a linked worktree of a normal repository is left out (the worktrees are re-read)', async () => {
   const worktrees = [{ path: '/r', branch: 'main', bare: false }, { path: '/w/b', branch: 'chore/b', bare: false }];
   const { F, store, api, dialogs } = await setup({ local: bulkLocal(), worktrees }, { deleteBranches: bulkDelete() }, [true]);

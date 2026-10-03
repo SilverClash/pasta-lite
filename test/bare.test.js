@@ -230,6 +230,20 @@ test('deleteBranch in a bare repo: HEAD\'s branch is current-branch, a branch a 
   await assert.rejects(runner.run(wt, 'deleteBranch', ['wtb', { force: true }]), { kind: 'checked-out-elsewhere' });
 });
 
+test('deleteBranches in a bare repo: HEAD\'s branch is current-branch, a linked worktree\'s is checked-out-elsewhere, the rest is deleted', async () => {
+  const { bare } = h.bareWithWorktree();
+  const runner = ops.createRunner();
+  h.git(bare, 'worktree', 'add', '-q', '-b', 'wtb', path.join(path.dirname(bare), 'other'), 'main');
+  h.git(bare, 'branch', 'feat', 'main');
+  const res = await runner.run(bare, 'deleteBranches', [['main', 'wtb', 'feat'], { force: true }]);
+  assert.deepEqual(res.deleted.map((d) => d.name), ['feat']);
+  assert.deepEqual(res.failed.map((f) => [f.name, f.kind]), [['main', 'current-branch'], ['wtb', 'checked-out-elsewhere']]);
+  assert.equal(rev(bare, 'refs/heads/wtb'), rev(bare, 'main'), 'still there');
+  assert.equal(h.git(bare, 'branch', '--list', 'feat').trim(), '');
+  await runner.run(bare, 'undo', []);
+  assert.equal(rev(bare, 'refs/heads/feat'), rev(bare, 'main'), 'undo recreates it');
+});
+
 test('undo in a bare repo offers only a branch delete: a commit entry in its HEAD reflog is blocked, never performed', async () => {
   const { bare } = h.bareWithWorktree();
   const runner = ops.createRunner();

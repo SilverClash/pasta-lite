@@ -422,6 +422,9 @@ async function checkout(cwd, ref, { kind = 'local' } = {}) {
   return { branch, oid: sha };
 }
 
+/** A non-empty string that can't be read as an option or split a line (checked before asking git). */
+const isPlainName = (name) => typeof name === 'string' && name !== '' && !name.startsWith('-') && !/[\0\n]/.test(name);
+
 /**
  * Throw kind 'invalid-args' unless `name` is a valid branch name by git's own rules
  * (`check-ref-format --branch`, which also rejects `* : ^ ~ ? [ \`, spaces, '..', '@{', 'HEAD';
@@ -430,7 +433,7 @@ async function checkout(cwd, ref, { kind = 'local' } = {}) {
  */
 async function validateBranchName(cwd, name, what = 'branch name') {
   const bad = () => kindError('invalid-args', `Invalid ${what}: '${name}'`);
-  if (typeof name !== 'string' || !name || name.startsWith('-') || /[\0\n]/.test(name)) throw bad();
+  if (!isPlainName(name)) throw bad();
   const norm = await tryOut(cwd, ['check-ref-format', '--branch', name]);
   if (norm === null || norm.replace(/\n$/, '') !== name) throw bad();
   return name;
@@ -505,7 +508,7 @@ module.exports = {
   commitFiles, diffCommitFile, diffWorkdir,
   stage, stageAll, unstage, unstageAll, discard, argvChunks,
   commit, lastCommit, commitInfo, commitError,
-  checkout, createBranch, deleteBranch, branchTips, removeBranch,
+  checkout, createBranch, deleteBranch, branchTips, removeBranch, isPlainName,
   // The modules git.js builds on, re-exported: this is the facade main.js, ops and tests use.
   status, PULL_MODES, pull,
   REMOTE_TIMEOUT_MS: remote.REMOTE_TIMEOUT_MS, mirrorRemotes: remote.mirrorRemotes, writesBranches: remote.writesBranches,
