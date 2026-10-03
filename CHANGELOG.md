@@ -8,6 +8,21 @@ minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Delete several local branches at once. In the sidebar, ⌘-click (Ctrl-click on Windows and Linux)
+  or ⌘/Ctrl+Space adds a branch to the selection and Shift-click or Shift+↑/↓ selects a range; Esc
+  goes back to one. Right-click the selection for **Delete N branches**, or right-click a folder for
+  **Delete all N branches in a folder** (subfolders included). One confirmation lists the branches;
+  the checked-out branch and branches checked out in other worktrees are left out. Branches that
+  aren't fully merged can be force-deleted together, and any that fail are listed without stopping
+  the rest. Undo restores the deleted branches one at a time, newest first.
+
+### Fixed
+
+- Deleting a branch that is checked out in a linked worktree of a normal repository now says so up
+  front instead of failing after the confirmation.
+
 ## [0.2.0] - 2026-09-28
 
 ### Added

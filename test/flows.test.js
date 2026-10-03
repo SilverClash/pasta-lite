@@ -10,7 +10,7 @@ const { scriptedApi, scriptDialogs } = H;
 
 const REPO = { root: '/r', name: 'r' };
 
-function baseData({ branch = 'main', upstream = 'origin/main', dirty = false, local, stashes = [], undoState, remotes } = {}) {
+function baseData({ branch = 'main', upstream = 'origin/main', dirty = false, local, stashes = [], undoState, remotes, worktrees } = {}) {
   const st = H.status({ oid: 'a'.repeat(40), branch, dirty });
   st.upstream = upstream;
   return {
@@ -20,6 +20,7 @@ function baseData({ branch = 'main', upstream = 'origin/main', dirty = false, lo
     log: { commits: [H.commit('a'.repeat(40))], hasMore: false, next: null },
     undoState: undoState === undefined ? { undo: null, redo: null, busy: false, undoBlocked: null, redoBlocked: null } : undoState,
     remotes,
+    worktrees,
   };
 }
 
@@ -2243,4 +2244,167 @@ test('worktree flows share the flow lock and the bare refusal: a stage while ano
   }
   assert.deepEqual(s.api.writes().map((c) => c.op), ['stage'], 'nothing else was written');
   assert.match(s.notices().at(-1), /needs a working tree \(bare repository\)$/);
+});
+
+// ------------------------------------------------------------------ deleteBranches (bulk)
+
+const bulkLocal = () => [
+  { name: 'main', oid: 'a'.repeat(40), upstream: 'origin/main', current: true },
+  { name: 'chore/a', oid: 'b'.repeat(40), upstream: null, current: false },
+  { name: 'chore/b', oid: 'c'.repeat(40), upstream: null, current: false },
+  { name: 'chore/c', oid: 'd'.repeat(40), upstream: null, current: false },
+];
+/** A deleteBranches handler: `fail` maps a name to [kind, message] (unless forced, for 'not-merged'). */
+const bulkDelete = (fail = {}) => (names, o) => {
+  const out = { deleted: [], failed: [] };
+  for (const name of names) {
+    const f = fail[name];
+    if (f && !(o.force && f[0] === 'not-merged')) out.failed.push({ name, kind: f[0], message: f[1] });
+    else out.deleted.push({ name, sha: 'b'.repeat(40), upstream: null });
+  }
+  return out;
+};
+
+test('deleteBranches: one confirmation listing the branches; the current branch is left out and named; one write', async () => {
+  const { F, store, api, dialogs, notices } = await setup({ local: bulkLocal() }, { deleteBranches: bulkDelete() }, [true]);
+  assert.equal(await F.deleteBranches(store, ['chore/a', 'main', 'chore/b', 'chore/a']), true);
+  assert.equal(dialogs.length, 1);
+  const { opts } = dialogs[0];
+  assert.equal(opts.title, 'Delete 2 branches?');
+  assert.equal(opts.confirmLabel, 'Delete 2 branches');
+  assert.equal(opts.danger, true);
+  assert.equal(opts.detail, 'chore/a\nchore/b');
+  assert.match(opts.message, /Not deleted: main \(checked out\)/);
+  assert.deepEqual(api.writes().map((c) => [c.op, ...c.args]), [['deleteBranches', ['chore/a', 'chore/b'], {}]]);
+  assert.deepEqual(notices(), ['Deleted 2 branches']);
+});
+
+test('deleteBranches: a long list is listed in full (the detail box scrolls)', async () => {
+  const local = [bulkLocal()[0], ...Array.from({ length: 15 }, (_, i) => ({ name: `b${i}`, oid: 'b'.repeat(40), upstream: null, current: false }))];
+  const { F, store, dialogs } = await setup({ local }, { deleteBranches: bulkDelete() }, [false]);
+  assert.equal(await F.deleteBranches(store, local.slice(1).map((b) => b.name)), false, 'cancelled');
+  assert.equal(dialogs[0].opts.detail.split('\n').length, 15);
+});
+
+test('deleteBranches: only the current branch -> an alert, no write; cancel -> no write', async () => {
+  const { F, store, api, dialogs } = await setup({ local: bulkLocal() }, { deleteBranches: bulkDelete() });
+  assert.equal(await F.deleteBranches(store, ['main']), false);
+  assert.equal(dialogs[0].type, 'alert');
+  assert.equal(dialogs[0].opts.title, 'Nothing to delete');
+  assert.equal(await F.deleteBranches(store, ['chore/a']), false, 'confirm answered no');
+  assert.equal(await F.deleteBranches(store, []), false);
+  assert.equal(await F.deleteBranches(store, 'chore/a'), false);
+  assert.deepEqual(api.writes(), []);
+});
+
+test('deleteBranches: unmerged branches are offered for a force delete together; other failures are listed, the rest deleted', async () => {
+  const fail = { 'chore/a': ['not-merged', 'not fully merged'], 'chore/b': ['checked-out-elsewhere', "cannot delete branch 'chore/b' used by worktree at '/w'"] };
+  const { F, store, api, dialogs } = await setup({ local: bulkLocal() }, { deleteBranches: bulkDelete(fail) }, [true, true, undefined]);
+  assert.equal(await F.deleteBranches(store, ['chore/a', 'chore/b', 'chore/c']), true);
+  assert.deepEqual(api.writes().map((c) => [c.op, ...c.args]), [
+    ['deleteBranches', ['chore/a', 'chore/b', 'chore/c'], {}],
+    ['deleteBranches', ['chore/a'], { force: true }],
+  ]);
+  assert.deepEqual(dialogs.map((d) => d.type), ['confirm', 'confirm', 'alert']);
+  assert.equal(dialogs[1].opts.title, 'Branch not fully merged');
+  assert.equal(dialogs[1].opts.confirmLabel, 'Force Delete');
+  assert.match(dialogs[1].opts.message, /^chore\/a has commits that aren't merged/, 'one branch: named, as deleteBranch does');
+  assert.equal(dialogs[1].opts.detail, undefined);
+  assert.equal(dialogs[2].opts.title, '1 branch could not be deleted');
+  assert.equal(dialogs[2].opts.message, 'Deleted 2 branches. Not deleted:');
+  assert.equal(dialogs[2].opts.detail, "chore/b: cannot delete branch 'chore/b' used by worktree at '/w'");
+});
+
+test('deleteBranches: declining the force delete keeps the unmerged ones and says so', async () => {
+  const fail = { 'chore/a': ['not-merged', 'x'], 'chore/b': ['not-merged', 'y'] };
+  const { F, store, api, dialogs, notices } = await setup({ local: bulkLocal() }, { deleteBranches: bulkDelete(fail) }, [true, false]);
+  assert.equal(await F.deleteBranches(store, ['chore/a', 'chore/b', 'chore/c']), true);
+  assert.equal(api.writes().length, 1);
+  assert.equal(dialogs[1].opts.title, '2 branches not fully merged');
+  assert.equal(dialogs[1].opts.detail, 'chore/a\nchore/b');
+  assert.deepEqual(notices(), ['Deleted 1 branch (kept 2 not fully merged)']);
+});
+
+test('deleteBranches: declining the force delete when nothing else was deleted says "No branches deleted"', async () => {
+  const fail = { 'chore/a': ['not-merged', 'x'], 'chore/b': ['not-merged', 'y'] };
+  const { F, store, notices } = await setup({ local: bulkLocal() }, { deleteBranches: bulkDelete(fail) }, [true, false]);
+  assert.equal(await F.deleteBranches(store, ['chore/a', 'chore/b']), false);
+  assert.deepEqual(notices(), ['No branches deleted (kept 2 not fully merged)']);
+});
+
+test('deleteBranches: more than the backend accepts in one write -> an alert before the confirmation, no write', async () => {
+  const local = [bulkLocal()[0], ...Array.from({ length: 1001 }, (_, i) => ({ name: `b${i}`, oid: 'b'.repeat(40), upstream: null, current: false }))];
+  const { F, store, api, dialogs } = await setup({ local }, { deleteBranches: bulkDelete() });
+  assert.equal(await F.deleteBranches(store, local.slice(1).map((b) => b.name)), false);
+  assert.deepEqual(dialogs.map((d) => [d.type, d.opts.title]), [['alert', 'Too many branches (1001)']]);
+  assert.match(dialogs[0].opts.message, /At most 1000 branches/);
+  assert.deepEqual(api.writes(), []);
+});
+
+test('deleteBranches: a branch checked out in a linked worktree of a normal repository is left out (the worktrees are re-read)', async () => {
+  const worktrees = [{ path: '/r', branch: 'main', bare: false }, { path: '/w/b', branch: 'chore/b', bare: false }];
+  const { F, store, api, dialogs } = await setup({ local: bulkLocal(), worktrees }, { deleteBranches: bulkDelete() }, [true]);
+  assert.equal(store.state.worktrees, null, 'the store keeps them for bare repositories only');
+  assert.equal(await F.deleteBranches(store, ['chore/a', 'chore/b']), true);
+  assert.equal(api.calls.filter((c) => c.op === 'worktrees').length, 1);
+  assert.equal(dialogs[0].opts.detail, 'chore/a');
+  assert.match(dialogs[0].opts.message, /Not deleted: chore\/b \(checked out in the worktree \/w\/b\)/);
+  assert.deepEqual(api.writes().map((c) => [c.op, ...c.args]), [['deleteBranches', ['chore/a'], {}]]);
+});
+
+test('deleteBranch: a branch checked out in a linked worktree is refused before the confirmation; a failed worktrees read still asks', async () => {
+  const worktrees = [{ path: '/w/b', branch: 'chore/b', bare: false }];
+  let s = await setup({ local: bulkLocal(), worktrees }, { deleteBranch: (name) => ({ name, sha: 'c'.repeat(40), upstream: null }) });
+  assert.equal(await s.F.deleteBranch(s.store, 'chore/b'), false);
+  assert.deepEqual(s.dialogs.map((d) => [d.type, d.opts.title, d.opts.message]), [
+    ['alert', 'Cannot delete this branch', 'chore/b is checked out in the worktree /w/b: it can’t be deleted'],
+  ]);
+  assert.deepEqual(s.api.writes(), []);
+
+  s = await setup({ local: bulkLocal() }, { worktrees: () => { throw err('boom', 'no worktrees'); }, deleteBranch: (name) => ({ name, sha: 'c'.repeat(40), upstream: null }) }, [true]);
+  assert.equal(await s.F.deleteBranch(s.store, 'chore/b'), true);
+  assert.equal(s.dialogs[0].opts.title, 'Delete branch?');
+});
+
+test('deleteBranches: a delete whose undo record failed is deleted, and its warning is shown', async () => {
+  const handler = (names) => ({ deleted: names.map((name) => ({ name, sha: 'b'.repeat(40), upstream: null, ...(name === 'chore/b' ? { undoRecorded: false, warning: 'could not record' } : {}) })), failed: [] });
+  const { F, store, dialogs, notices } = await setup({ local: bulkLocal() }, { deleteBranches: handler }, [true]);
+  assert.equal(await F.deleteBranches(store, ['chore/a', 'chore/b']), true);
+  assert.deepEqual(dialogs.map((d) => d.type), ['confirm', 'alert']);
+  assert.equal(dialogs[1].opts.title, 'Deleted 2 branches');
+  assert.equal(dialogs[1].opts.message, 'Deleted 2 branches.');
+  assert.equal(dialogs[1].opts.detail, 'chore/b: could not record');
+  assert.deepEqual(notices(), []);
+});
+
+test('deleteBranches: a force write that rejects still gets the summary, with the unmerged branches listed as not deleted', async () => {
+  const handler = (names, o) => {
+    if (o.force) throw err('boom', 'disk full');
+    return bulkDelete({ 'chore/a': ['not-merged', 'x'] })(names, o);
+  };
+  const { F, store, api, dialogs, errors } = await setup({ local: bulkLocal() }, { deleteBranches: handler }, [true, true]);
+  assert.equal(await F.deleteBranches(store, ['chore/a', 'chore/b']), true);
+  assert.equal(api.writes().length, 2);
+  assert.deepEqual(dialogs.map((d) => d.type), ['confirm', 'confirm', 'alert']);
+  assert.equal(dialogs[2].opts.title, '1 branch could not be deleted');
+  assert.equal(dialogs[2].opts.message, 'Deleted 1 branch. Not deleted:');
+  assert.equal(dialogs[2].opts.detail, 'chore/a: disk full');
+  assert.deepEqual(errors().map((e) => e.message), ['disk full'], 'toasted once by the write');
+});
+
+test('deleteBranches: another repository opened before the force question: no question, no force write, nothing shown', async () => {
+  let finish;
+  const handler = (names, o) => (o.force ? bulkDelete()(names, o) : new Promise((r) => { finish = () => r(bulkDelete({ 'chore/a': ['not-merged', 'x'] })(names, o)); }));
+  const { F, store, api, dialogs, notices, errors } = await setup({ local: bulkLocal() }, { deleteBranches: handler }, [true, true]);
+  const running = F.deleteBranches(store, ['chore/a', 'chore/b']);
+  await H.flush();
+  await store.actions.loadRepo({ root: '/other', name: 'other' });
+  await H.flush();
+  finish();
+  assert.equal(await running, true, 'chore/b was deleted');
+  assert.deepEqual(dialogs.map((d) => d.opts.title), ['Delete 2 branches?']);
+  assert.equal(api.writes().filter((c) => c.op === 'deleteBranches').length, 1);
+  assert.deepEqual(notices(), []);
+  assert.deepEqual(errors(), []);
+  assert.equal(F.isRunning(store), false);
 });

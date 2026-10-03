@@ -215,7 +215,7 @@
   // Flows that start an operation which can't run while another is in progress, with the action
   // name for their disabled title (fetch, setUpstream, stashDrop and openTerminal are fine).
   const START_FLOWS = Object.freeze({
-    checkout: 'Checkout', createBranch: 'Branch', deleteBranch: 'Delete branch', push: 'Push', pull: 'Pull',
+    checkout: 'Checkout', createBranch: 'Branch', deleteBranch: 'Delete branch', deleteBranches: 'Delete branches', push: 'Push', pull: 'Pull',
     stashSave: 'Stash', stashPop: 'Pop stash', stashApply: 'Apply stash', merge: 'Merge', rebase: 'Rebase',
     interactiveRebase: 'Interactive rebase', undo: 'Undo', redo: 'Redo',
   });

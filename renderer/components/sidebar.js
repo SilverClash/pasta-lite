@@ -3,11 +3,14 @@
 // Branch names are grouped into folders by '/' prefix. Clicking a ref or stash selects its commit
 // (store.actions.select); double-click checks out a branch / applies a stash, and a context menu
 // (right-click, Shift+F10 or the ContextMenu key) offers the ref's actions, run through window.PLFlows.
+// Local branches can be multi-selected (⌘/Ctrl-click or ⌘/Ctrl+Space toggles, Shift-click or
+// Shift+Arrow selects a range in visible order, a plain click or Esc goes back to one): the menu of a
+// row in such a selection, and of a local folder, only deletes those branches (flow deleteBranches).
 // Collapsed sections persist in localStorage (global), collapsed folders per repository. Git data goes
 // through textContent only, via util.displayName (bidi/control characters shown as escapes).
 (function () {
   const { el, util } = window.Components;
-  const { displayName, relTime, absTime, storage, pathTree, repoKey, short } = util;
+  const { displayName, relTime, absTime, storage, pathTree, repoKey, short, plural } = util;
   const icon = (name, size = 14, cls) => (window.PLIcons ? window.PLIcons.icon(name, size, cls) : el('span', 'icon')); // NOSONAR(S1788): the argument order of PLIcons.icon
   /** The refs list (store refs) that holds a row target of each ref kind. */
   const REF_LISTS = Object.freeze({ local: 'local', remote: 'remote', tag: 'tags' });
@@ -220,6 +223,72 @@
     return d && !bareBlocked(state, d.flow, d.args) ? d : null;
   }
 
+  // ------------------------------------------------------------------ multi-selection (pure)
+  //
+  // Local branch rows ('local:<name>' keys) can be selected together: sel = {keys: Set, anchor}.
+
+  const LOCAL_KEY = 'local:';
+  const LOCAL_DIR = 'dir:local:/';
+  const isMultiKey = (key) => typeof key === 'string' && key.startsWith(LOCAL_KEY);
+
+  /**
+   * The selection after a click on row `key`; `order`: the selectable keys in visible order.
+   * range (Shift-click, Shift+Arrow): anchor..key, the anchor kept (without a visible anchor: just
+   * key); toggle (⌘/Ctrl-click, ⌘/Ctrl+Space): key added or removed, and it becomes the anchor — the
+   * last selected key stays (as in a file manager); neither: just key. A key that isn't selectable
+   * clears the selection.
+   */
+  function nextSelection(sel, key, order, { toggle = false, range = false } = {}) {
+    const cur = sel || { keys: new Set(), anchor: null };
+    if (!order.includes(key)) return { keys: new Set(), anchor: null };
+    if (range && cur.anchor && order.includes(cur.anchor)) {
+      const [a, b] = [order.indexOf(cur.anchor), order.indexOf(key)].sort((x, y) => x - y);
+      return { keys: new Set(order.slice(a, b + 1)), anchor: cur.anchor };
+    }
+    if (toggle && !range) {
+      const keys = new Set(cur.keys);
+      if (keys.has(key) && keys.size === 1) return { keys, anchor: key };
+      if (keys.has(key)) keys.delete(key);
+      else keys.add(key);
+      return { keys, anchor: key };
+    }
+    return { keys: new Set([key]), anchor: key };
+  }
+
+  /** The local branch names of selection keys, in order. */
+  const selectedBranches = (keys) => [...(keys || [])].filter(isMultiKey).map((k) => k.slice(LOCAL_KEY.length));
+
+  /** Menu descriptors of a multi-selection (keys): "Delete N branches" only. */
+  function selectionMenuItems(keys, state, flows = flowsOf()) {
+    const names = selectedBranches(keys);
+    return names.length ? [A.deleteBranchesItem(names, state, { flows })] : [];
+  }
+
+  /**
+   * The local branches under folder row `folderKey` ('dir:local:/chore', nested folders included)
+   * that match `filter` (lower-cased, as the model's) — the ones its count shows; null for another row.
+   */
+  function folderBranches(folderKey, state, filter = '') {
+    if (typeof folderKey !== 'string' || !folderKey.startsWith(LOCAL_DIR)) return null;
+    const prefix = `${folderKey.slice(LOCAL_DIR.length)}/`;
+    const local = (state && state.refs && state.refs.local) || [];
+    return local.map((b) => b.name)
+      .filter((n) => n.startsWith(prefix) && (!filter || n.toLowerCase().includes(filter)))
+      .sort(cmp);
+  }
+
+  /**
+   * Menu descriptors of a folder row: "Delete all N branches in <folder>/" for a local folder (N: the
+   * ones the flow deletes; without "all" when it leaves some out), else none.
+   */
+  function folderMenuItems(folderKey, state, { filter = '', flows = flowsOf() } = {}) {
+    const names = folderBranches(folderKey, state, filter);
+    if (!names || !names.length) return [];
+    const where = `${displayName(folderKey.slice(LOCAL_DIR.length))}/`;
+    const label = (n) => `Delete ${n > 1 && n === names.length ? 'all ' : ''}${plural(n, 'branch', 'branches')} in ${where}`;
+    return [A.deleteBranchesItem(names, state, { label, flows })];
+  }
+
   /** Menu descriptors for a target (rowTarget result). */
   const targetMenuItems = (target, state, flows = flowsOf()) => {
     if (!target) return [];
@@ -236,6 +305,8 @@
       let filter = '';
       let activeKey = null; // row the user last clicked (several refs can share a sha)
       let focusKey = null; // roving tabindex target
+      let multi = { keys: new Set(), anchor: null }; // local branch rows selected together (nextSelection)
+      let selecting = false; // selectRow is changing the store's selection (not the graph)
       let lastRepoRoot = null;
       let lastSig = null; // JSON of the model the DOM shows
 
@@ -266,6 +337,8 @@
       const list = el('div', 'sb-list');
       list.setAttribute('role', 'tree');
       list.setAttribute('aria-label', 'References');
+      // On the tree: ARIA allows aria-multiselectable on a tree, not on the local section's group.
+      list.setAttribute('aria-multiselectable', 'true');
       root.replaceChildren(header, list);
 
       // ---- model -> DOM
@@ -347,6 +420,14 @@
         list.replaceChildren(...model.sections.map(sectionEl));
         summary.textContent = model.summary;
         summary.hidden = !model.summary;
+        // Rows no longer shown (deleted, filtered out, in a collapsed folder) leave the selection;
+        // fewer than two left: back to the row whose commit is selected (what is highlighted then).
+        const kept = [...multi.keys].filter((k) => rowsByKey.has(k));
+        if (kept.length > 1 || kept.length === multi.keys.size) {
+          multi = { keys: new Set(kept), anchor: rowsByKey.has(multi.anchor) ? multi.anchor : null };
+        } else {
+          multi = isMultiKey(activeKey) && rowsByKey.has(activeKey) ? { keys: new Set([activeKey]), anchor: activeKey } : { keys: new Set(), anchor: null };
+        }
 
         updateSelection();
         updateRoving();
@@ -361,8 +442,9 @@
         const sel = store.state.selection;
         const sha = sel && sel.kind === 'commit' ? sel.sha : null;
         const activeMatches = activeKey && rowsByKey.get(activeKey) && rowsByKey.get(activeKey).dataset.sha === sha;
+        const many = multi.keys.size > 1;
         for (const [key, r] of rowsByKey) {
-          const on = !!sha && r.dataset.sha === sha && (activeMatches ? key === activeKey : true);
+          const on = many ? multi.keys.has(key) : !!sha && r.dataset.sha === sha && (activeMatches ? key === activeKey : true);
           r.classList.toggle('selected', on);
           if (r.getAttribute('role') === 'treeitem' && r.dataset.kind !== 'section') r.setAttribute('aria-selected', String(on));
         }
@@ -394,6 +476,23 @@
         render();
       }
 
+      /** Select row r's commit (the row stays the highlighted one of the rows at that sha). */
+      function selectRow(r) {
+        activeKey = r.dataset.key;
+        const cur = store.state.selection;
+        if (cur && cur.kind === 'commit' && cur.sha === r.dataset.sha) updateSelection();
+        else {
+          selecting = true;
+          try {
+            store.actions.select({ kind: 'commit', sha: r.dataset.sha });
+          } finally {
+            selecting = false;
+          }
+        }
+      }
+
+      const selectableKeys = () => [...rowsByKey.keys()].filter(isMultiKey); // visible order
+
       function activate(r) {
         if (!r) return;
         focusKey = r.dataset.key;
@@ -401,18 +500,29 @@
         if (kind === 'section') toggleSection(r.dataset.section);
         else if (kind === 'folder') toggleFolder(r.dataset.toggle);
         else if (r.dataset.sha) {
-          activeKey = r.dataset.key;
-          const cur = store.state.selection;
-          if (cur && cur.kind === 'commit' && cur.sha === r.dataset.sha) updateSelection();
-          else store.actions.select({ kind: 'commit', sha: r.dataset.sha });
+          multi = nextSelection(multi, r.dataset.key, selectableKeys());
+          selectRow(r);
           updateRoving();
         } else updateRoving();
+      }
+
+      /** ⌘/Ctrl-click or ⌘/Ctrl+Space (toggle), Shift-click or Shift+Arrow (range) on local branch row r. */
+      function extendSelection(r, opts) {
+        multi = nextSelection(multi, r.dataset.key, selectableKeys(), opts);
+        focusKey = r.dataset.key;
+        const only = multi.keys.size === 1 ? rowsByKey.get([...multi.keys][0]) : null;
+        if (only) selectRow(only);
+        else updateSelection(); // activeKey stays the row whose commit is selected (Esc goes back to it while selected)
+        updateRoving();
       }
 
       function onClick(e) {
         const r = e.target.closest('.sb-item');
         if (!r || !list.contains(r)) return;
-        activate(r);
+        const toggle = util.modKey(e);
+        const range = !!e.shiftKey;
+        if ((toggle || range) && isMultiKey(r.dataset.key) && r.dataset.sha) extendSelection(r, { toggle, range });
+        else activate(r);
         const again = rowsByKey.get(r.dataset.key);
         if (again) again.focus({ preventScroll: true });
       }
@@ -432,12 +542,21 @@
       }
       list.addEventListener('dblclick', onDblClick);
 
+      /** Menu descriptors of one row: a local folder's, else its target's (rowTarget). */
+      const rowMenuItems = (r) => (r.dataset.kind === 'folder'
+        ? folderMenuItems(r.dataset.toggle, store.state, { filter })
+        : targetMenuItems(rowTarget(r.dataset.key, store.state), store.state));
+
       // Context menu: right-click on a row, or the ContextMenu key / Shift+F10 on the focused row.
       const unbindMenu = bindContextMenu(list, {
         targetOf: rowOf,
         anchorOf: (r) => r,
         itemsFor(r) {
-          const descs = targetMenuItems(rowTarget(r.dataset.key, store.state), store.state);
+          const key = r.dataset.key;
+          const inSelection = multi.keys.size > 1 && multi.keys.has(key);
+          // a row outside the multi-selection becomes the selection (as in a file manager)
+          if (!inSelection && multi.keys.size > 1 && r.dataset.sha) activate(r);
+          const descs = inSelection ? selectionMenuItems(multi.keys, store.state) : rowMenuItems(r);
           if (!descs.length) return [];
           focusKey = r.dataset.key;
           updateRoving();
@@ -446,11 +565,52 @@
         },
       });
 
+      const isBranchRow = (r) => !!r && isMultiKey(r.dataset.key) && !!r.dataset.sha;
+
+      /**
+       * Keyboard multi-selection of local branch rows: Shift+ArrowUp/Down extends the range from the
+       * anchor (the focused row when there is none) to the previous / next local branch row;
+       * ⌘/Ctrl+Space toggles the focused one. True when `e` was one of them.
+       */
+      function selectionKey(e, cur) {
+        if (e.altKey) return false;
+        if (e.key === ' ' && util.modKey(e) && !e.shiftKey) {
+          if (!isBranchRow(cur)) return false; // elsewhere it's left to the app shortcuts
+          extendSelection(cur, { toggle: true });
+          return true;
+        }
+        if ((e.key !== 'ArrowDown' && e.key !== 'ArrowUp') || !e.shiftKey || e.metaKey || e.ctrlKey) return false;
+        if (!isBranchRow(cur)) return false; // plain navigation elsewhere
+        const order = selectableKeys();
+        const next = rowsByKey.get(order[order.indexOf(cur.dataset.key) + (e.key === 'ArrowDown' ? 1 : -1)]);
+        if (!next) return true;
+        if (!multi.anchor || !rowsByKey.has(multi.anchor)) multi = { keys: new Set([cur.dataset.key]), anchor: cur.dataset.key };
+        extendSelection(next, { range: true });
+        next.scrollIntoView({ block: 'nearest' });
+        return true;
+      }
+
+      /** Esc: back from a multi-selection to one row (the one whose commit is selected, if still in it). */
+      function collapseSelection() {
+        const keys = [...multi.keys].filter((k) => rowsByKey.has(k));
+        const key = keys.includes(activeKey) ? activeKey : keys.at(-1);
+        multi = key ? { keys: new Set([key]), anchor: key } : { keys: new Set(), anchor: null };
+        if (key) selectRow(rowsByKey.get(key));
+        else updateSelection();
+      }
+
       function onListKey(e) {
+        const cur = e.target.closest && e.target.closest('.sb-item');
+        if (selectionKey(e, cur)) {
+          const f = rowsByKey.get(focusKey);
+          if (f) f.focus();
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         // ⌘/Ctrl/Alt combinations are app shortcuts (⌘↵ commit, ⌘Z undo, …), not tree navigation.
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         const items = [...list.querySelectorAll('.sb-item')];
-        const cur = e.target.closest && e.target.closest('.sb-item');
         const i = items.indexOf(cur);
         const move = (j) => {
           const t = items[Math.max(0, Math.min(items.length - 1, j))];
@@ -479,6 +639,10 @@
           case 'ArrowLeft':
             if (expanded === 'true') activate(cur);
             if (rowsByKey.get(focusKey)) rowsByKey.get(focusKey).focus();
+            break;
+          case 'Escape':
+            if (multi.keys.size < 2) return;
+            collapseSelection();
             break;
           default: return;
         }
@@ -546,10 +710,18 @@
           loadFolders(repoRoot);
           activeKey = null;
           focusKey = null;
+          multi = { keys: new Set(), anchor: null };
           input.value = '';
           clear.hidden = true;
           filter = '';
           list.scrollTop = 0;
+        }
+        // A selection this sidebar didn't make (the graph, a refresh) ends a multi-selection, and a
+        // one-row selection unless it's still that row's commit: a later ⌘/Shift-click starts afresh.
+        if (changed.includes('selection') && !selecting) {
+          const a = rowsByKey.get(multi.anchor);
+          const sha = s.selection && s.selection.sha;
+          if (multi.keys.size > 1 || !a || a.dataset.sha !== sha) multi = { keys: new Set(), anchor: null };
         }
         const relevant = changed.filter((k) => k !== 'selection' && (k !== 'status' || statusMoved));
         if (relevant.length || lastSig === null) render();
@@ -575,5 +747,6 @@
 
   if (typeof module !== 'undefined') module.exports = {
     sidebarModel, buildTree, rowTarget, branchMenuItems, stashMenuItems, doubleClickAction,
+    nextSelection, selectedBranches, selectionMenuItems, folderBranches, folderMenuItems,
   };
 })();

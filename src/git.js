@@ -422,6 +422,9 @@ async function checkout(cwd, ref, { kind = 'local' } = {}) {
   return { branch, oid: sha };
 }
 
+/** A non-empty string that can't be read as an option or split a line (checked before asking git). */
+const isPlainName = (name) => typeof name === 'string' && name !== '' && !name.startsWith('-') && !/[\0\n]/.test(name);
+
 /**
  * Throw kind 'invalid-args' unless `name` is a valid branch name by git's own rules
  * (`check-ref-format --branch`, which also rejects `* : ^ ~ ? [ \`, spaces, '..', '@{', 'HEAD';
@@ -430,7 +433,7 @@ async function checkout(cwd, ref, { kind = 'local' } = {}) {
  */
 async function validateBranchName(cwd, name, what = 'branch name') {
   const bad = () => kindError('invalid-args', `Invalid ${what}: '${name}'`);
-  if (typeof name !== 'string' || !name || name.startsWith('-') || /[\0\n]/.test(name)) throw bad();
+  if (!isPlainName(name)) throw bad();
   const norm = await tryOut(cwd, ['check-ref-format', '--branch', name]);
   if (norm === null || norm.replace(/\n$/, '') !== name) throw bad();
   return name;
@@ -463,6 +466,30 @@ async function deleteBranch(cwd, name, { force = false } = {}) {
   const row = await refFields(cwd, fullBranch(name), ['%(objectname)', '%(upstream:short)']);
   if (!row) throw kindError('not-found', `Branch '${name}' not found`);
   const [sha, upstream] = row;
+  return removeBranch(cwd, { name, sha, upstream: upstream || null }, { force });
+}
+
+/**
+ * Every local branch in one for-each-ref: Map name -> {sha, upstream (short name) | null}. What
+ * several deletes check their names against (instead of a lookup per branch).
+ */
+async function branchTips(cwd) {
+  const raw = await out(cwd, ['for-each-ref', `--format=${['%(refname)', '%(objectname)', '%(upstream:short)'].join('%00')}`, 'refs/heads']);
+  const tips = new Map();
+  for (const line of raw.split('\n')) {
+    const [ref, sha, upstream] = line.split('\0');
+    const name = ref ? branchOf(ref) : null;
+    if (name !== null) tips.set(name, { sha, upstream: upstream || null });
+  }
+  return tips;
+}
+
+/**
+ * `git branch -d` (force: -D) of local branch {name, sha, upstream} the caller already looked up
+ * (deleteBranch, or branchTips with HEAD checked); resolves to it. Kinds: 'not-merged',
+ * 'checked-out-elsewhere'.
+ */
+async function removeBranch(cwd, { name, sha, upstream }, { force = false } = {}) {
   try {
     await run(cwd, ['branch', force ? '-D' : '-d', name]);
   } catch (err) {
@@ -481,7 +508,7 @@ module.exports = {
   commitFiles, diffCommitFile, diffWorkdir,
   stage, stageAll, unstage, unstageAll, discard, argvChunks,
   commit, lastCommit, commitInfo, commitError,
-  checkout, createBranch, deleteBranch,
+  checkout, createBranch, deleteBranch, branchTips, removeBranch, isPlainName,
   // The modules git.js builds on, re-exported: this is the facade main.js, ops and tests use.
   status, PULL_MODES, pull,
   REMOTE_TIMEOUT_MS: remote.REMOTE_TIMEOUT_MS, mirrorRemotes: remote.mirrorRemotes, writesBranches: remote.writesBranches,

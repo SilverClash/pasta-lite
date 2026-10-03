@@ -26,7 +26,7 @@
 //   flows-kit.js      the wrapper (flow, scoped, NO_DIALOG, settle), the kept-stash wording and
 //                     reportOutcome, authAlert, tagConflictsAlert, and the flows below
 //   flows-sync.js     fetch, pull, pullMode / setPullMode / PULL_MODES, push, setUpstream
-//   flows-branch.js   checkout, createBranch, deleteBranch, branchNameError
+//   flows-branch.js   checkout, createBranch, deleteBranch, deleteBranches, branchNameError
 //   flows-stash.js    stashSave, stashPop, stashApply, stashDrop
 //   flows-worktree.js stage, unstage, stageAll, unstageAll, discard, markResolved, commit and the hunk /
 //                     line selections (the WIP panel and the diff view)
@@ -64,7 +64,7 @@
   // question is answered "cancel".
   const NO_DIALOG = Object.freeze({
     alert: async () => undefined, confirm: async () => false, choose: async () => null, prompt: async () => null,
-    editMessage: async () => null, confirmDiscard: async () => false, pathListText: (paths) => C.dialog.pathListText(paths),
+    editMessage: async () => null, confirmDiscard: async () => false, pathListText: (paths, max) => C.dialog.pathListText(paths, max),
   });
 
   /** Components.dialog for a flow of `store` (NO_DIALOG once its repository was switched away from). */

@@ -34,6 +34,28 @@ const { kindError } = exec;
 // ---------------------------------------------------------------- registry
 
 const LOG_MAX = 10000;
+const DELETE_BRANCHES_MAX = 1000; // the deleteBranches flow (renderer/flows-branch.js) checks the same cap
+
+/**
+ * Record deleted branch `res` ({name, sha, upstream}) for undo; a failed record is reported
+ * ({undoRecorded: false, warning}), not thrown. `at`: HEAD's sha when the caller already read it.
+ */
+async function recorded(repo, res, at) {
+  try {
+    await undo.recordBranchDelete(repo, res, { at });
+  } catch (err) {
+    const why = err && err.message ? err.message : String(err);
+    return { ...res, undoRecorded: false, warning: `The branch was deleted, but its deletion could not be recorded for undo: ${why}` };
+  }
+  return res;
+}
+
+/** A name deleteBranches accepts before looking it up: a string that can't be read as an option or split a line. */
+function branchArg(v) {
+  const n = str(v, 'name');
+  if (!git.isPlainName(n)) throw invalid(`Invalid name: '${n}'`);
+  return n;
+}
 
 /**
  * An operation split into `check` (validate the renderer's args, may ask the repo; returns the
@@ -304,15 +326,38 @@ const WRITE = {
     if (await git.isCurrentBranch(repo, b)) throw kindError('current-branch', `Cannot delete the current branch '${b}'`);
     if (!(await git.refExists(repo, `refs/heads/${b}`))) throw kindError('not-found', `Branch '${b}' not found`);
     return [b, { force: bool(opts(o).force) }];
-  }, async (repo, name, o) => {
-    const res = await git.deleteBranch(repo, name, o);
-    try {
-      await undo.recordBranchDelete(repo, res);
-    } catch (err) {
-      const why = err && err.message ? err.message : String(err);
-      return { ...res, undoRecorded: false, warning: `The branch was deleted, but its deletion could not be recorded for undo: ${why}` };
+  }, async (repo, name, o) => recorded(repo, await git.deleteBranch(repo, name, o))), { bare: true }),
+  // deleteBranches(names, {force?}): several local branches, one after the other, in one write (one
+  // 'changed' event). HEAD and the local branches are read once; each branch then costs one
+  // `git branch -d` (-D) plus its undo record. A branch that can't be deleted (kinds 'not-merged',
+  // 'current-branch', 'not-found', 'checked-out-elsewhere', …) doesn't stop the others; once the op
+  // is cancelled, the branches not yet tried fail with kind 'aborted'. Resolves to {deleted:
+  // [deleteBranch's result], failed: [{name, kind, message}]}; each delete is recorded for undo on
+  // its own (Undo restores them one at a time, newest first).
+  deleteBranches: write(op((repo, names, o) => {
+    if (!Array.isArray(names) || !names.length) throw invalid('names must be a non-empty array');
+    if (names.length > DELETE_BRANCHES_MAX) throw invalid(`names must have at most ${DELETE_BRANCHES_MAX} entries`);
+    return [[...new Set(names.map(branchArg))], { force: bool(opts(o).force) }];
+  }, async (repo, names, o, signal) => {
+    const [head, tips] = await Promise.all([exec.headState(repo), git.branchTips(repo)]);
+    const deleted = [];
+    const failed = [];
+    for (const [i, name] of names.entries()) {
+      if (signal && signal.aborted) {
+        for (const n of names.slice(i)) failed.push({ name: n, kind: 'aborted', message: 'Not attempted: the delete was cancelled' });
+        break;
+      }
+      try {
+        const tip = tips.get(name);
+        if (!tip) throw kindError('not-found', `Branch '${name}' not found`);
+        if (name === head.branch) throw kindError('current-branch', `Cannot delete the current branch '${name}'`);
+        deleted.push(await recorded(repo, await git.removeBranch(repo, { name, ...tip }, o), head.sha || undefined));
+      } catch (err) {
+        const e = serializeError(err);
+        failed.push({ name, kind: e.kind || null, message: e.message });
+      }
     }
-    return res;
+    return { deleted, failed };
   }), { bare: true }),
   stashPush: write(op((repo, message) => [message ? str(message, 'message') : undefined], (repo, m) => git.stashPush(repo, m))),
   stashApply: write(op(async (repo, entry) => {
