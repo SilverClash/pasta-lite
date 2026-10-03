@@ -26,6 +26,11 @@
 //   deletableBranches(names, state) -> {names, skipped: [{name, why, title}]}   what a bulk delete removes
 //   deleteBranchesItem(names, state, {label?(n), flows?}) -> the finished "Delete N branches" descriptor
 //                                   (sidebar multi-selection and folder menus; N: the deletable ones)
+//   worktreeRefusal(w, action, state) -> {title} | null   why linked-worktree entry `w` (a state.worktrees
+//                                   item) can't be opened / revealed / locked / unlocked / deleted / pruned
+//   worktreeMenuItems(w, state, flows?, {platform?}?) -> finished descriptors of a sidebar worktree row: Open,
+//                                   Reveal (Finder / Explorer / File Manager), Copy Path, Lock… / Unlock,
+//                                   Prune… (a prunable one), Delete…
 // "Finished": gated (PLPolicy.gateItems) and disabled while busy or without their flow
 // (Components.actions.finishItems, looked up when a menu is built: actions.js loads after this script).
 (function () {
@@ -335,7 +340,71 @@
     ], state, flows);
   }
 
+  const dn = displayName;
+  const WT_MAIN = "The main worktree can't be locked";
+
+  /**
+   * Why worktree `w` (a state.worktrees entry) can't take `action` ('open', 'reveal', 'lock', 'unlock',
+   * 'delete' or 'prune'), or null: {title} (display-safe). The renderer's mirror of main's safety
+   * checks (main re-checks them). `state` is unused for now; it keeps the signature of deleteRefusal.
+   */
+  function worktreeRefusal(w, action, state) { // eslint-disable-line no-unused-vars
+    if (!w) return null;
+    const main = !!(w.main || w.bare);
+    switch (action) {
+      case 'open':
+        if (w.current) return { title: 'This tab has this worktree open' };
+        if (w.bare) return { title: 'The bare repository has no working tree to open' };
+        if (w.prunable) return { title: 'Its folder is gone: prune it' };
+        return null;
+      case 'reveal':
+        return w.prunable ? { title: 'Its folder is gone' } : null;
+      case 'lock':
+      case 'unlock':
+        return main ? { title: WT_MAIN } : null;
+      case 'delete':
+        if (w.bare) return { title: "The bare repository can't be deleted here" };
+        if (w.main) return { title: "The main worktree can't be deleted" };
+        if (w.current) return { title: 'This tab has this worktree open: open another worktree and delete it from there' };
+        if (w.locked) return { title: `Locked${w.lockReason ? ` (${dn(w.lockReason)})` : ''}: unlock it first` };
+        if (w.prunable) return { title: 'Its folder is already gone: use Prune' };
+        return null;
+      case 'prune':
+        return w.locked ? { title: 'Locked: git keeps locked worktrees. Unlock it first' } : null;
+      default:
+        return null;
+    }
+  }
+
+  /** The reveal item's label for `platform` ('darwin' | 'win32' | other); default: the running one. */
+  function revealLabel(platform) {
+    const p = platform || (C.util.IS_MAC ? 'darwin' : (typeof navigator !== 'undefined' && /Win/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.userAgent || '') ? 'win32' : 'linux'));
+    if (p === 'darwin') return 'Reveal in Finder';
+    return p === 'win32' ? 'Show in Explorer' : 'Show in File Manager';
+  }
+
+  /** The finished context menu of worktree entry `w` (see the header). */
+  function worktreeMenuItems(w, state, flows = flowsOf(), { platform } = {}) {
+    if (!w) return [];
+    const off = (d, no) => (no ? { ...d, disabled: true, title: no.title } : d);
+    const open = off({ label: 'Open', flow: 'openWorktree', args: [w.path], title: 'Show the tab that has it open, else open it in a new tab' }, worktreeRefusal(w, 'open', state));
+    const reveal = off({ label: revealLabel(platform), flow: 'revealWorktree', args: [w.path] }, worktreeRefusal(w, 'reveal', state));
+    const items = [
+      open,
+      reveal,
+      { label: 'Copy Path', flow: 'copyWorktreePath', args: [w.path] },
+      { separator: true },
+      off(w.locked
+        ? { label: 'Unlock', flow: 'unlockWorktree', args: [w.path] }
+        : { label: 'Lock…', flow: 'lockWorktree', args: [w.path] }, worktreeRefusal(w, w.locked ? 'unlock' : 'lock', state)),
+    ];
+    if (w.prunable) items.push(off({ label: 'Prune…', flow: 'pruneWorktrees', args: [] }, worktreeRefusal(w, 'prune', state)));
+    items.push({ separator: true }, off({ label: 'Delete…', flow: 'removeWorktree', args: [w.path], danger: true }, worktreeRefusal(w, 'delete', state)));
+    return finish(items, state || {}, flows);
+  }
+
   const api = {
+    worktreeRefusal, worktreeMenuItems,
     refMenuItems, commitOpItems, commitItems, stashMenuItems, checkoutItem, createHere, upstreamTarget, behindOf, deleteItem, fullRef,
     deleteRefusal, deletableBranches, deleteBranchesItem,
   };

@@ -61,14 +61,14 @@ function loadComponentHelpers() {
 
 /**
  * loadComponentHelpers() plus menu.js and the flows (flows-kit.js, flows-sync.js, flows-branch.js, flows-stash.js,
- * flows-worktree.js, flows-op.js, flows-merge.js, flows-rebase.js:
+ * flows-worktree.js, flows-linked-worktrees.js, flows-op.js, flows-merge.js, flows-rebase.js:
  * window.Components.menu, window.PLFlows; the global
  * shortcuts read Components.actions, which a test may replace).
  * Pass `dom` (from fakeDom()) first to get working dialogs and menus.
  */
 function loadFlows() {
   const win = loadComponentHelpers();
-  for (const f of ['menu.js', 'flows-kit.js', 'flows-sync.js', 'flows-branch.js', 'flows-stash.js', 'flows-worktree.js', 'flows-op.js', 'flows-merge.js', 'flows-rebase.js']) {
+  for (const f of ['menu.js', 'flows-kit.js', 'flows-sync.js', 'flows-branch.js', 'flows-stash.js', 'flows-worktree.js', 'flows-linked-worktrees.js', 'flows-op.js', 'flows-merge.js', 'flows-rebase.js']) {
     delete require.cache[require.resolve(R(f))];
     require(R(f));
   }
