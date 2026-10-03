@@ -46,7 +46,7 @@ const path = require('node:path');
 const { out } = require('./exec');
 const { parseStageEntries } = require('./porcelain');
 const { logger } = require('./log');
-const { realPathSync } = require('./fs-paths');
+const { realPathSync, isAtOrUnder } = require('./fs-paths');
 
 const watcherLog = logger.child('watcher');
 /** Default `log` for createWatcher: a warning in the shared logger. */
@@ -244,7 +244,7 @@ function createWatcher(root, {
   let flushAgain = false;
   let closed = false;
 
-  const inside = (abs, dir) => abs === dir || abs.startsWith(dir + path.sep);
+  const inside = isAtOrUnder;
   const posixRel = (from, abs) => path.relative(from, abs).split(path.sep).join('/');
 
   function logOnce(message, err) {

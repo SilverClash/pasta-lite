@@ -15,8 +15,8 @@
 // Linked worktrees (remove, lock, unlock, the unreachable count) are named by the path git prints
 // for them: each check re-reads `git worktree list` and takes only an entry whose path is exactly
 // that string, so the renderer can never point git at an arbitrary folder. A worktree is not
-// deleted while a rebase or merge is stopped in it, or while any tab's write runs there
-// (worktree-busy).
+// deleted while a rebase or merge is stopped in it, while another worktree is inside it, or while
+// any tab's write runs there, and no write starts there while it is deleted (worktree-busy).
 const git = require('./git');
 const hunks = require('./hunks');
 const undo = require('./undo');
@@ -253,13 +253,20 @@ async function guardedDiscard(repo, paths, fn, signal) {
 
 const LOCK_REASON_MAX = 200;
 
-/** The entry of a fresh `git worktree list` whose path is exactly `p` (as git prints it), else kind 'not-found'. */
-async function listedWorktree(repo, p) {
+/**
+ * The entry of a fresh `git worktree list` whose path is exactly `p` (as git prints it), else
+ * kind 'not-found': {w, entries, here} (git.worktreeList: every entry and the tab root with
+ * their real paths, so the checks never realpath them again).
+ */
+async function listed(repo, p) {
   const wtPath = str(p, 'path');
-  const w = (await git.worktrees(repo)).find((e) => e.path === wtPath);
+  const { entries, here } = await git.worktreeList(repo);
+  const w = entries.find((e) => e.path === wtPath);
   if (!w) throw kindError('not-found', `Not a worktree of this repository: '${wtPath}'`);
-  return w;
+  return { w, entries, here };
 }
+
+const listedWorktree = async (repo, p) => (await listed(repo, p)).w;
 
 /** Refuse the main worktree or a bare repo's own entry (kind 'main-worktree'): it can't be `what`. */
 function notMain(w, what) {
@@ -268,16 +275,26 @@ function notMain(w, what) {
 
 /**
  * Refuse the main / bare entry ('main-worktree') and the tab's own or one containing it
- * ('current-worktree'): `repo` (the tab's root) is the entry's folder or inside it, compared
- * through fs-paths.realPathOf.
+ * ('current-worktree'): `here` (the real path of the tab's root) is the entry's folder or inside it.
  */
-async function notMainOrCurrent(repo, w, what) {
+function notMainOrCurrent(here, w, what) {
   notMain(w, what);
-  const [here, there] = (await Promise.all([realPathOf(repo), realPathOf(w.path)])).map((r) => r.real);
-  const nested = here !== there && isAtOrUnder(here, there);
-  if (w.current || here === there || nested) {
+  const nested = here !== w.real && isAtOrUnder(here, w.real);
+  if (w.current || here === w.real || nested) {
     throw kindError('current-worktree', `This tab has this worktree open${nested ? ' (or one inside it)' : ''}: it can't be ${what} from here`);
   }
+}
+
+/**
+ * Refuse (worktree-busy) deleting `w` while another listed worktree whose folder is there sits
+ * inside its folder: `git worktree remove` deletes the whole folder, the inner worktree's files
+ * (and any stopped rebase) with it, without asking when the inner one is git-ignored, and behind a
+ * misleading "untracked files" force confirm when it isn't. Force doesn't override this. The
+ * main worktree and a bare git dir count too (a linked worktree around the repository itself).
+ */
+function nothingNestedIn(w, entries) {
+  const inner = entries.find((e) => e !== w && !e.missing && isAtOrUnder(e.real, w.real));
+  if (inner) throw kindError('worktree-busy', `Another worktree is inside it (${inner.path}): delete that one first`);
 }
 
 // What a stopped operation is called in the worktree-busy message (repoDirs.repoState's states).
@@ -289,28 +306,63 @@ const STOPPED_OP = Object.freeze({
 /**
  * Refuse (worktree-busy) deleting listed worktree `w` while an operation is stopped in it: `git
  * worktree remove` (even without force, on a clean tree) deletes its git dir with the rebase or
- * merge state and its HEAD reflog, so the commits made so far would be lost.
+ * merge state and its HEAD reflog, so the commits made so far would be lost. Read from `admin`,
+ * the admin folder git deletes (git.worktreeAdminDir), with the file system only: no git runs in
+ * `w`'s folder (which may hang on a dead mount, or have a `.git` file pointing elsewhere).
  */
-async function nothingStoppedIn(w) {
-  const state = await exec.repoState(w.path);
+function nothingStoppedIn(w, admin) {
+  const state = exec.stateAt(admin);
   if (state === 'clean') return;
   const what = STOPPED_OP[state] || 'An operation';
   throw kindError('worktree-busy', `${what} is in progress in ${w.path}: finish or abort it first`, { state });
 }
 
+/** The admin folder of listed linked worktree `w`, else worktree-busy: nothing can be checked. */
+async function adminDirOf(repo, w) {
+  const admin = await git.worktreeAdminDir(repo, w);
+  if (!admin) throw kindError('worktree-busy', `Can't find git's record of ${w.path}: nothing was deleted`);
+  return admin;
+}
+
 // The write ops that delete another worktree's folder: (checked args) -> that folder. The runner
-// queues writes per root, so a tab with that worktree open would not wait for them: busyThere
-// refuses them while any write runs or waits at or inside the folder.
+// queues writes per root, so a tab with that worktree open would not wait for them: worktreeVet
+// refuses them while any write runs or waits at or inside the folder, and refuses any write there
+// while one runs.
 const DELETES_FOLDER = Object.freeze({ removeWorktree: (checked) => checked[0] });
 
-/** The runner's vet (createRunner): kind 'worktree-busy' when `running` has a write in the folder op `name` deletes. */
-async function busyThere(running, name, checked) {
-  const folderOf = DELETES_FOLDER[name];
-  const writes = folderOf ? running.filter((e) => e.write) : [];
+/** Kind 'worktree-busy' when `running` (runner.running(), read when called) has a write at or inside `there` (a promise of a real path). */
+async function busyThere(running, there) {
+  const writes = running.filter((e) => e.write);
   if (!writes.length) return null;
-  const [there, ...roots] = await Promise.all([realPathOf(folderOf(checked)), ...writes.map((e) => realPathOf(e.repo))]);
-  if (!roots.some((r) => isAtOrUnder(r.real, there.real))) return null;
+  const [folder, ...roots] = await Promise.all([there, ...writes.map((e) => realPathOf(e.repo).then((r) => r.real))]);
+  if (!roots.some((r) => isAtOrUnder(r, folder))) return null;
   return kindError('worktree-busy', 'Another tab is running a git operation there: try again when it finishes');
+}
+
+/**
+ * The runner's vet (createRunner), asked of every op once its check passed and before it starts.
+ * An op that deletes a folder (DELETES_FOLDER) records it in `deleting` (Map: token -> promise of
+ * its real path) at once, before anything is awaited, then is refused while a write runs or
+ * waits there (busyThere); the record goes when the op settles. Any other write whose repo is at
+ * or inside a folder being deleted is refused (worktree-busy). Every write is in running() from
+ * the moment it is asked for, before its own vet, so whichever of the two comes second sees the
+ * other: no write starts in a folder while it is deleted, and no delete starts under a write.
+ */
+async function worktreeVet({ running, deleting }, repo, name, checked, { write, settled }) {
+  const folderOf = DELETES_FOLDER[name];
+  if (folderOf && checked) {
+    const token = {};
+    const there = realPathOf(folderOf(checked)).then((r) => r.real);
+    deleting.set(token, there);
+    const refused = await busyThere(running(), there);
+    if (refused) deleting.delete(token);
+    else settled.then(() => deleting.delete(token));
+    return refused;
+  }
+  if (!write || !deleting.size) return null;
+  const [here, ...folders] = await Promise.all([realPathOf(repo).then((r) => r.real), ...deleting.values()]);
+  if (!folders.some((f) => isAtOrUnder(here, f))) return null;
+  return kindError('worktree-busy', 'This worktree is being deleted');
 }
 
 /** A lock reason: trimmed, one line of at most LOCK_REASON_MAX characters; empty or absent = undefined. */
@@ -543,19 +595,27 @@ const WRITE = {
   // removeWorktree(path, {force?}) -> {path}. Also refused: worktree-locked (`reason`; never
   // `-f -f`: unlock first), not-found for a prunable or missing entry (its folder is gone: prune
   // it), worktree-busy (`state`) while a rebase, merge, cherry-pick, revert, am or bisect is
-  // stopped there, and worktree-busy (the runner's vet, busyThere) while any tab's write runs or
-  // waits there; force overrides neither. git refuses worktree-dirty (`submodules`) without force.
+  // stopped there, worktree-busy while another listed worktree's folder is inside it, and
+  // worktree-busy (the runner's vet, worktreeVet) while any tab's write runs or waits there; force
+  // overrides none of them. While it runs, any write at or inside that folder is refused
+  // (worktree-busy, "being deleted"). git refuses worktree-dirty (`submodules`) without force.
   removeWorktree: write(op(async (repo, p, o) => {
     const force = bool(opts(o).force);
-    const w = await listedWorktree(repo, p);
-    await notMainOrCurrent(repo, w, 'deleted');
+    const { w, entries, here } = await listed(repo, p);
+    notMainOrCurrent(here, w, 'deleted');
     if (w.locked) {
       throw kindError('worktree-locked', `${w.path} is locked${w.lockReason ? `: ${w.lockReason}` : ''}. Unlock it first`, { reason: w.lockReason });
     }
     if (w.prunable || w.missing) throw kindError('not-found', 'Its folder is gone: prune it instead');
-    await nothingStoppedIn(w);
-    return [w.path, { force }];
-  }, (repo, p, o) => git.removeWorktree(repo, p, o)), { bare: true }),
+    nothingNestedIn(w, entries);
+    const admin = await adminDirOf(repo, w);
+    nothingStoppedIn(w, admin);
+    return [w.path, { force, admin }];
+  }, (repo, p, { force, admin }) => {
+    // Again as the act begins: a rebase started (in a terminal) after the check is caught too.
+    nothingStoppedIn({ path: p }, admin);
+    return git.removeWorktree(repo, p, { force });
+  }), { bare: true }),
   // pruneWorktrees() -> {entries: [{id, reason}]}: forgets the worktrees whose folder is gone (git
   // keeps locked ones). Takes no path.
   pruneWorktrees: write((repo) => git.pruneWorktrees(repo), { bare: true }),
@@ -602,15 +662,16 @@ const BARE_OK = Object.freeze(new Set(names((d) => d.bare)));
 
 /**
  * The runner (src/runner.js) for this registry, with the bare-repository gate and the
- * worktree-busy vet (busyThere). `o` overrides for tests: {ops, writeOps, log, now} (an op
+ * worktree-busy vet (worktreeVet). `o` overrides for tests: {ops, writeOps, log, now} (an op
  * missing from the registry is gated like a working-tree op).
  */
 function createRunner(o = {}) {
+  const state = { running: () => r.running(), deleting: new Map() };
   const r = runner.createRunner({
     ops: OPS,
     writeOps: WRITE_OPS,
     gate: (repo, name, args) => bareGate(repo, name, args, DESCRIPTORS[name]),
-    vet: (repo, name, checked) => busyThere(r.running(), name, checked),
+    vet: (repo, name, checked, info) => worktreeVet(state, repo, name, checked, info),
     ...o,
   });
   return r;

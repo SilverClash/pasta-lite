@@ -1495,6 +1495,104 @@ test('removeWorktree: worktree-busy while another tab\'s write runs or waits in 
   assert.deepEqual(events, ['hold', 'hold', 'removeWorktree', 'removeWorktree'], 'a refusal emits no events');
 });
 
+test('removeWorktree: worktree-busy while another worktree is inside it (ignored or untracked), even with force; nothing is deleted', async () => {
+  const { dir, wts } = withWorktrees('ign', 'untr');
+  const runner = ops.createRunner();
+  const events = [];
+  runner.on('changed', (e) => events.push(e.op));
+  // (a) .worktrees/ is ignored: git itself would remove ign without force, inner and all.
+  h.commitFile(wts.ign, '.gitignore', '.worktrees/\n', 'ignore worktrees');
+  const innerIgn = path.join(wts.ign, '.worktrees', 'inner');
+  h.git(dir, 'worktree', 'add', '-q', '-b', 'inner-ign', innerIgn);
+  h.write(innerIgn, 'precious.txt', 'p\n');
+  // (b) not ignored: git's refusal would read as "untracked files", and force would wipe it.
+  const innerUntr = path.join(wts.untr, 'inner');
+  h.git(dir, 'worktree', 'add', '-q', '-b', 'inner-untr', innerUntr);
+  for (const [outer, inner] of [[wts.ign, innerIgn], [wts.untr, innerUntr]]) {
+    for (const o of [{}, { force: true }]) {
+      await assert.rejects(runner.run(dir, 'removeWorktree', [outer, o]), {
+        kind: 'worktree-busy', message: `Another worktree is inside it (${inner}): delete that one first`,
+      });
+    }
+  }
+  assert.ok(fs.existsSync(path.join(innerIgn, 'precious.txt')) && fs.existsSync(innerUntr));
+  assert.deepEqual(events, [], 'refused in the check');
+  // A missing inner one doesn't count (its folder is gone already: prune it).
+  fs.rmSync(innerUntr, { recursive: true, force: true });
+  assert.deepEqual(await runner.run(dir, 'removeWorktree', [wts.untr, { force: true }]), { path: wts.untr });
+  // The inner one first, then the outer one.
+  assert.deepEqual(await runner.run(dir, 'removeWorktree', [innerIgn, { force: true }]), { path: innerIgn });
+  assert.deepEqual(await runner.run(dir, 'removeWorktree', [wts.ign]), { path: wts.ign });
+});
+
+test('removeWorktree: the stopped state is read from git\'s admin folder for it, not through the folder\'s .git file; checked again as it starts', async () => {
+  const { dir, wts } = withWorktrees('reb', 'other');
+  const runner = ops.createRunner();
+  h.commitFile(wts.reb, 'r.txt', 'r\n', 'on reb');
+  h.git(wts.reb, '-c', 'sequence.editor=sed -i.bak s/^pick/edit/', 'rebase', '-q', '-i', 'HEAD~1');
+  const admin = h.git(wts.reb, 'rev-parse', '--absolute-git-dir').trim();
+  // reb's .git file now points at other's (clean) git dir: git run there would see no rebase.
+  const otherGitDir = h.git(wts.other, 'rev-parse', '--absolute-git-dir').trim();
+  fs.writeFileSync(path.join(wts.reb, '.git'), `gitdir: ${otherGitDir}\n`);
+  await assert.rejects(runner.run(dir, 'removeWorktree', [wts.reb, { force: true }]), {
+    kind: 'worktree-busy', message: `A rebase is in progress in ${wts.reb}: finish or abort it first`,
+  });
+  assert.ok(fs.existsSync(path.join(admin, 'rebase-merge')));
+  // Stopped after the check passed (a terminal): the act checks again before git runs.
+  const { dir: d2, wts: w2 } = withWorktrees('late');
+  const checked = await ops.OPS.removeWorktree.check(d2, w2.late, {});
+  h.commitFile(w2.late, 'l.txt', 'l\n', 'on late');
+  h.git(w2.late, '-c', 'sequence.editor=sed -i.bak s/^pick/edit/', 'rebase', '-q', '-i', 'HEAD~1');
+  assert.throws(() => ops.OPS.removeWorktree.act(d2, ...checked), {
+    kind: 'worktree-busy', message: `A rebase is in progress in ${w2.late}: finish or abort it first`,
+  });
+  assert.ok(fs.existsSync(w2.late));
+});
+
+test('removeWorktree: while it runs, a write at or inside that folder is refused as being deleted; reads and other folders are not', async () => {
+  const { dir, wts } = withWorktrees('a', 'b');
+  const hold = deferred();
+  const deleting = deferred();
+  const real = ops.OPS.removeWorktree;
+  // The real check, and an act that holds until released (the delete in progress).
+  const removeWorktree = Object.assign(async () => {}, { check: real.check, act: () => { deleting.resolve(); return hold.promise; } });
+  const runner = ops.createRunner({
+    ops: { ...ops.OPS, removeWorktree, poke: async () => 'poked', peek: async () => 'peeked' },
+    writeOps: new Set([...ops.WRITE_OPS, 'poke']),
+  });
+  const events = [];
+  runner.on('changed', (e) => events.push(e.op));
+  const removing = runner.run(dir, 'removeWorktree', [wts.a]);
+  await deleting.promise;
+  const gone = { kind: 'worktree-busy', message: 'This worktree is being deleted' };
+  await assert.rejects(runner.run(wts.a, 'poke', []), gone, 'a plain write (no check)');
+  await assert.rejects(runner.run(wts.a, 'stage', [['README.md']]), gone, 'a checked write');
+  const link = path.join(h.tmpDir(), 'link-a');
+  fs.symlinkSync(wts.a, link);
+  fs.mkdirSync(path.join(wts.a, 'sub'));
+  await assert.rejects(runner.run(path.join(link, 'sub'), 'poke', []), gone, 'inside it, by another spelling');
+  assert.equal(await runner.run(wts.a, 'peek', []), 'peeked', 'a read');
+  assert.equal(await runner.run(wts.b, 'poke', []), 'poked', 'another worktree');
+  hold.resolve({ path: wts.a });
+  assert.deepEqual(await removing, { path: wts.a });
+  assert.equal(await runner.run(wts.a, 'poke', []), 'poked', 'over: no longer refused');
+  // A refused delete leaves no record behind.
+  const held = deferred();
+  const started = deferred();
+  const r2 = ops.createRunner({
+    ops: { ...ops.OPS, hold: async () => { started.resolve(); await held.promise; }, poke: async () => 'poked' },
+    writeOps: new Set([...ops.WRITE_OPS, 'hold', 'poke']),
+  });
+  const holding = r2.run(wts.b, 'hold', []);
+  await started.promise;
+  await assert.rejects(r2.run(dir, 'removeWorktree', [wts.b]), { kind: 'worktree-busy', message: 'Another tab is running a git operation there: try again when it finishes' });
+  fs.mkdirSync(path.join(wts.b, 'sub'));
+  assert.equal(await r2.run(path.join(wts.b, 'sub'), 'poke', []), 'poked', 'b is not being deleted'); // not behind hold in b's queue
+  held.resolve();
+  await holding;
+  assert.deepEqual(events, ['poke', 'removeWorktree', 'poke'], 'refusals emit no events');
+});
+
 test('worktreeUnreachable: listed paths only; 0 without git on a branch; the detached HEAD\'s commits no ref keeps', async () => {
   const { dir, parent, wts } = withWorktrees('a', 'det');
   const runner = ops.createRunner();

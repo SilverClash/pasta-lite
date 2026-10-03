@@ -23,9 +23,15 @@ minor versions may contain breaking changes.
   worktree to open it, reveal it in the file manager, copy its path, lock or unlock it (with an
   optional reason), or delete it; **Prune** previews what will be removed first. Deleting a worktree
   with changes asks for a force confirmation, and the main, current and locked worktrees are never
-  deleted, nor one with a rebase or merge stopped in it or a git operation running there. Deleting a
-  detached worktree warns how many of its commits no branch or tag keeps. Changes made in a
-  terminal show up automatically.
+  deleted, nor one with a rebase or merge stopped in it, another worktree inside it or a git
+  operation running there. Deleting a detached worktree warns how many of its commits no branch or
+  tag keeps. The dirty check skips a worktree whose own config could run a command the repository
+  wasn't trusted for. Changes made in a terminal show up automatically.
+
+### Changed
+
+- A repository trusted earlier under another spelling of its path (another letter case on a
+  case-insensitive disk) is recognised, instead of asking again.
 
 ### Fixed
 

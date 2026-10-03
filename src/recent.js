@@ -64,10 +64,14 @@ function createTrustStore(filePath) {
       && Array.isArray(e.keys) && e.keys.every((k) => typeof k === 'string'));
   }
 
+  // A saved root is compared by its real path too, as the recent list does: one saved with
+  // another spelling (a symlink, or another letter case on a case-insensitive file system, which
+  // the native realpath canonicalises) is the same repo.
+  const find = (entries, real) => entries.find((e) => e.root === real || realPathSync(e.root) === real);
+
   /** True when every one of `keys` was accepted for `root`. */
   function isTrusted(root, keys) {
-    const real = realPathSync(root);
-    const entry = load().find((e) => e.root === real);
+    const entry = find(load(), realPathSync(root));
     return !!entry && keys.every((k) => entry.keys.includes(k));
   }
 
@@ -75,7 +79,7 @@ function createTrustStore(filePath) {
   function trust(root, keys) {
     const real = realPathSync(root);
     const entries = load();
-    const old = entries.find((e) => e.root === real);
+    const old = find(entries, real);
     const merged = [...new Set([...(old ? old.keys : []), ...keys])].sort(); // NOSONAR(S2871): config keys; code-unit order is intended
     writeJson(filePath, [{ root: real, keys: merged }, ...entries.filter((e) => e !== old)]);
   }
