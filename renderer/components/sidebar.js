@@ -15,7 +15,7 @@
 // end a branch multi-selection), and its context menu is Components.actions.worktreeMenuItems (open,
 // reveal, copy path, lock / unlock, prune, delete). The filter matches its branch, folder name or head.
 // store.actions.revealWorktree() (the toolbar's linked-worktree chip; store worktreeReveal) opens the
-// section, clears a filter that hides the current worktree's row, then scrolls to that row, focuses it
+// section (for now: a collapsed preference stays saved), clears a filter that hides the current worktree's row, then scrolls to that row, focuses it
 // and flashes it (sb-flash, REVEAL_FLASH_MS); before the first worktrees read, the section header.
 // Collapsed sections persist in localStorage (global), collapsed folders per repository. Git data goes
 // through textContent only, via util.displayName (bidi/control characters shown as escapes).
@@ -372,6 +372,8 @@
     mount(root, store) {
       const stored = storage.get(LS_SECTIONS, {});
       const collapsedSections = isObject(stored) ? stored : {};
+      // Sections opened only for a reveal (revealWorktree), not by the user: still saved collapsed.
+      const revealedOpen = new Set();
       const collapsedFolders = new Set(); // for the current repo (see loadFolders)
       const rowsByKey = new Map(); // rebuilt by render()
       // view state
@@ -547,11 +549,19 @@
       }
 
       // ---- interaction
-      function toggleSection(id, open) {
+      /**
+       * Open or close section id (open undefined: toggle). The user's choice is saved; `reveal`
+       * (revealWorktree) opens it for now only and keeps the saved collapsed preference.
+       */
+      function toggleSection(id, open, { reveal = false } = {}) {
         const now = open === undefined ? !!collapsedSections[id] : open;
         if (now) delete collapsedSections[id];
         else collapsedSections[id] = true;
-        storage.set(LS_SECTIONS, collapsedSections);
+        if (reveal) revealedOpen.add(id);
+        else revealedOpen.delete(id);
+        const saved = { ...collapsedSections };
+        for (const r of revealedOpen) saved[r] = true;
+        storage.set(LS_SECTIONS, saved);
         if (id === WORKTREES) wantDirty(now);
         render();
       }
@@ -812,7 +822,7 @@
       function revealWorktree() {
         const cur = (store.state.worktrees || []).find((w) => w && w.current);
         const key = cur ? `worktree:${cur.path}` : `section:${WORKTREES}`;
-        if (collapsedSections[WORKTREES]) toggleSection(WORKTREES, true);
+        if (collapsedSections[WORKTREES]) toggleSection(WORKTREES, true, { reveal: true });
         if (!rowsByKey.has(key) && filter) {
           input.value = '';
           clear.hidden = true;

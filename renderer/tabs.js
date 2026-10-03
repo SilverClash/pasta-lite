@@ -29,25 +29,25 @@
 
   /**
    * A tab's icon: the branch, or for a linked worktree (t.linked, main's repo.linkedWorktree) a
-   * tree, the sidebar's worktree icon (a New Tab's is dimmed). data-icon says which.
+   * tree, the sidebar's worktree icon from renderer/icons.js (tabs.html loads it), drawn a little
+   * bolder at the tab's 14px (a New Tab's is dimmed). data-icon says which.
    */
   function tabIcon(linked) {
+    if (linked) {
+      const tree = window.PLIcons.icon('worktree', 14, 'tab-icon');
+      tree.setAttribute('stroke-width', '2.1');
+      tree.dataset.icon = 'worktree';
+      return tree;
+    }
     const svg = document.createElementNS(SVG, 'svg');
-    svg.setAttribute('class', `tab-icon${linked ? ' tab-icon-worktree' : ''}`);
+    svg.setAttribute('class', 'tab-icon');
     svg.setAttribute('aria-hidden', 'true');
-    svg.dataset.icon = linked ? 'worktree' : 'branch';
+    svg.dataset.icon = 'branch';
     const shape = (name, attrs) => {
       const n = document.createElementNS(SVG, name);
       for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
       svg.append(n);
     };
-    if (linked) {
-      svg.setAttribute('viewBox', '0 0 24 24');
-      const stroke = { fill: 'none', stroke: 'currentColor', 'stroke-width': '2.1', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
-      shape('circle', { cx: '12', cy: '8.5', r: '5.5', ...stroke });
-      shape('path', { d: 'M12 14v7M8.5 21h7M12 17l-3-2.5', ...stroke });
-      return svg;
-    }
     svg.setAttribute('viewBox', '0 0 16 16');
     const stroke = { fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round' };
     shape('circle', { cx: '4.5', cy: '3.5', r: '1.75', ...stroke });
@@ -95,7 +95,6 @@
       setIcon(el, !!t.linked);
       el.querySelector('.tab-title').textContent = t.title;
       el.title = t.tooltip || t.title;
-      el.classList.toggle('is-linked-worktree', !!t.linked);
       el.setAttribute('aria-selected', t.active ? 'true' : 'false');
       el.classList.toggle('is-empty', !t.root);
       el.classList.toggle('is-busy', !!t.busy);

@@ -180,6 +180,7 @@ describe('the strip page (renderer/tabs.js)', () => {
     let listener = null;
     const prev = { window: globalThis.window, document: globalThis.document };
     globalThis.window = {
+      PLIcons: require('../renderer/icons.js'), // tabs.html loads icons.js first
       tabsApi: {
         isMac: true, list: () => new Promise(() => {}), subscribe: (cb) => { listener = cb; return () => {}; },
         activate: async () => {}, close: async () => {}, newTab: async () => {}, move: async () => {}, menu: async () => {}, log() {},
@@ -208,8 +209,7 @@ describe('the strip page (renderer/tabs.js)', () => {
     assert.deepEqual([a.firstChild.dataset.icon, a.querySelector('.tab-title').textContent], ['branch', 'monorepo']);
     assert.deepEqual([b.firstChild.dataset.icon, b.querySelector('.tab-title').textContent], ['worktree', 'monorepo · monorepo-feat']);
     assert.equal(b.title, '~/monorepo-feat\nLinked worktree of ~/monorepo');
-    assert.equal(b.classList.contains('is-linked-worktree'), true);
-    assert.equal(a.classList.contains('is-linked-worktree'), false);
+    assert.match(b.firstChild.getAttribute('class'), /\bicon-worktree\b.*\btab-icon\b/, 'icons.js\'s tree, styled as a tab icon');
     // The tab switches to the main worktree: the icon goes back, in place (still the first child).
     strip.apply({ tabs: [tab({ id: 1, title: 'monorepo', active: true }), tab({ id: 2, title: 'monorepo' })] });
     assert.equal(strip.tabEl(2), b, 'the element is kept');

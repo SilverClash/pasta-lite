@@ -2,7 +2,8 @@
 // Inline SVG icons (plain script; exposes window.PLIcons, and module.exports under node for the tests;
 // loads after components.js, before the components). Built with createElementNS: no innerHTML, no
 // external assets. Used by the toolbar, the sidebar (its Worktrees section: worktree, home, lock),
-// the repository picker and the WIP file lists.
+// the repository picker and the WIP file lists; the tab strip (tabs.html, on its own: it needs
+// nothing else) takes its linked-worktree tree icon from here.
 //   PLIcons.icon(name, size = 18, className = '') -> <svg class="icon icon-<name> <className>">
 (function () {
   const SVG_NS = 'http://www.w3.org/2000/svg';

@@ -70,7 +70,8 @@
    * The state.worktrees entry (kept by the store for every repository) of another worktree that has
    * local branch `name` checked out, or null: never the bare entry, nor this tab's own worktree
    * (current: decided in main), whose branch is the checked-out one. deleteRefusal and
-   * checkoutRefusal share it.
+   * checkoutRefusal share it. A branch mid-rebase or mid-bisect in another worktree is listed as
+   * detached there (no `branch`), so it isn't found: git's refusal is the backstop for it.
    */
   function worktreeHolding(name, state) {
     const list = state && Array.isArray(state.worktrees) ? state.worktrees : [];
@@ -81,7 +82,9 @@
    * Why branch `name` can't be checked out here, or null: {title} 'Checked out in worktree <path>'
    * (display-safe) when another worktree has it (git refuses: kind 'checked-out-elsewhere' stays
    * the backstop when state.worktrees is stale). kind 'remote' ('origin/x'): its local branch
-   * ('x', which the checkout would switch to) is checked; a commit never is. Used by checkoutItem
+   * ('x', which the checkout would switch to) is checked, when state.refs lists the remote branch
+   * (a remote name may contain '/', so the name is never split; unlisted: null, git decides); a
+   * commit never is. Used by checkoutItem
    * (the menus, the branch switcher) and the double-clicks (sidebar rows, graph ref pills).
    */
   function checkoutRefusal(name, state, { kind = 'local' } = {}) {
@@ -89,7 +92,8 @@
     let branch = name;
     if (kind === 'remote') {
       const r = ((state && state.refs && state.refs.remote) || []).find((x) => x.name === name);
-      branch = r && r.branch ? r.branch : name.slice(name.indexOf('/') + 1);
+      if (!r || !r.branch) return null;
+      branch = r.branch;
     }
     const wt = worktreeHolding(branch, state);
     return wt ? { title: `Checked out in worktree ${displayName(wt.path)}` } : null;

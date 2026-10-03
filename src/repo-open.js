@@ -112,16 +112,29 @@ function projectName(mainPath, bare) {
   return bare && base.startsWith('.') ? path.basename(path.dirname(mainPath)) : base;
 }
 
+// How long the `worktree list` fallback of mainWorktreeOf may take: git stats every listed worktree,
+// and one on a hung network volume must not hold up an open (it falls back to git's own guess).
+const LIST_TIMEOUT_MS = 5000;
+
 /**
- * linkedWorktree of summary(): null for a main worktree (its git dir is the common dir), a bare repo
- * or a folder git can't answer for; for a linked worktree {mainPath, mainName, title}: mainPath the
- * main worktree (git's first `worktree list` entry; a bare repo's git dir when the main one is
- * bare), mainName its projectName, title what the tab strip and the window title show,
- * '<mainName> · <worktree folder name>'. Without a list (git failed) the main worktree is git's own
- * guess from the common dir: its parent when it is a `.git` folder, else the dir itself.
+ * linkedWorktree of summary(): null for a main worktree (its git dir is the common dir), a bare repo,
+ * a submodule or a folder git can't answer for; for a linked worktree {mainPath, mainName, title}:
+ * mainPath its main worktree (mainWorktreeOf; a bare repo's git dir when the main one is bare),
+ * mainName its projectName, title what the tab strip and the window title show,
+ * '<mainName> · <worktree folder name>'.
+ * Cheap on every open and app:getState: a linked worktree's root always has a `.git` *file*, so a
+ * root with a `.git` folder (a main worktree) or none (a bare repo) runs no git at all; else the
+ * repo's git dirs (repoDirs, cached per root) decide. A failed lookup (any GitError, a timeout or a
+ * cancellation included) never fails the open: no git dirs give null, no main worktree git's guess.
  */
-async function linkedWorktreeOf(root, bare) {
-  if (bare) return null;
+async function linkedWorktreeOf(root) {
+  let dotGit;
+  try {
+    dotGit = fs.lstatSync(path.join(root, '.git'), { throwIfNoEntry: false });
+  } catch {
+    return null;
+  }
+  if (!dotGit || !dotGit.isFile()) return null;
   let dirs;
   try {
     dirs = await repoDirs(root);
@@ -130,24 +143,41 @@ async function linkedWorktreeOf(root, bare) {
     throw err;
   }
   if (!dirs.gitDir || gitDirKey(dirs.gitDir) === gitDirKey(dirs.commonDir)) return null;
-  const raw = await tryOut(root, ['worktree', 'list', '--porcelain', '-z']);
-  const main = raw ? parseWorktrees(raw)[0] : null;
-  const common = gitDirKey(dirs.commonDir);
-  const guess = path.basename(common) === '.git' ? { path: path.dirname(common), bare: false } : { path: common, bare: true };
-  const { path: mainPath, bare: mainBare } = main && main.path ? main : guess;
-  const mainName = projectName(mainPath, !!mainBare);
+  const { path: mainPath, bare: mainBare } = await mainWorktreeOf(root, gitDirKey(dirs.commonDir));
+  const mainName = projectName(mainPath, mainBare);
   return { mainPath, mainName, title: `${mainName} · ${path.basename(root)}` };
 }
 
 /**
- * {root, name, head, bare, linkedWorktree} of an already resolved root (a worktree root or a bare
- * git dir). `bare` is asked fresh (app:getState calls this on every focus): the folder may have
- * changed since exec cached it. linkedWorktree: see linkedWorktreeOf (null unless `root` is a
- * linked worktree).
+ * {path, bare} of the main worktree of linked worktree `root`, whose common git dir is `common`:
+ * - common is a `.git` folder: its parent (what `git worktree list` prints first, with no process);
+ * - else core.worktree of the common dir, relative to it: a submodule's `sup/.git/modules/sub`
+ *   names its worktree `sup/sub` there, while `worktree list` would print the modules dir;
+ * - else `worktree list`'s first entry (the bare + worktrees layout: the bare git dir), bounded by
+ *   LIST_TIMEOUT_MS; when git fails, git's own guess: the common dir itself, bare.
  */
-async function summary(root) {
-  const [head, bare] = await Promise.all([headState(root), isBare(root, { fresh: true })]);
-  return { root, name: repoName(root, bare), head, bare, linkedWorktree: await linkedWorktreeOf(root, bare) };
+async function mainWorktreeOf(root, common) {
+  if (path.basename(common) === '.git') return { path: path.dirname(common), bare: false };
+  const quiet = (p) => p.catch((err) => {
+    if (err instanceof GitError) return null;
+    throw err;
+  });
+  const wt = await quiet(tryOut(root, ['config', '--file', path.join(common, 'config'), '--get', 'core.worktree']));
+  if (wt && wt.trim()) return { path: path.resolve(common, wt.replace(/\r?\n$/, '')), bare: false };
+  const raw = await quiet(tryOut(root, ['worktree', 'list', '--porcelain', '-z'], { timeout: LIST_TIMEOUT_MS }));
+  const main = raw ? parseWorktrees(raw)[0] : null;
+  return main && main.path ? { path: main.path, bare: !!main.bare } : { path: common, bare: true };
 }
 
-module.exports = { openRepo, bareRoot, summary, repoName, projectName };
+/**
+ * {root, name, head, bare, linkedWorktree} of an already resolved root (a worktree root or a bare
+ * git dir). `bare` is asked fresh (app:getState calls this): the folder may have changed since exec
+ * cached it. linkedWorktree: see linkedWorktreeOf (null unless `root` is a linked worktree), looked
+ * up alongside head and bare.
+ */
+async function summary(root) {
+  const [head, bare, linked] = await Promise.all([headState(root), isBare(root, { fresh: true }), linkedWorktreeOf(root)]);
+  return { root, name: repoName(root, bare), head, bare, linkedWorktree: bare ? null : linked };
+}
+
+module.exports = { openRepo, bareRoot, summary, repoName, projectName, linkedWorktreeOf };

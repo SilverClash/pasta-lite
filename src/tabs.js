@@ -123,7 +123,8 @@ function pickOpenTarget(tabs, { root, fromId = null, newTab = false, preferExist
 /**
  * A tab's title (also the window title's): a linked worktree's 'project · folder'
  * (repo.linkedWorktree.title, src/repo-open.js), else its repo's name (ops.repoName; the root's
- * basename only when it has none), or 'New Tab'.
+ * basename only when it has none), or 'New Tab'. Folder names are used raw, as repo.name always
+ * was: main has no display sanitiser, and the strip sets the title with textContent.
  */
 function tabTitle(repo) {
   if (!repo || !repo.root) return NEW_TAB_TITLE;

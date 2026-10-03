@@ -556,3 +556,20 @@ test('mounted: the branch switcher disables a branch checked out in another work
   assert.deepEqual(t.flows.calls, [], 'no checkout ran');
   t.dispose();
 });
+
+test('mounted: main\'s fresh summary of the same repo (store.actions.updateRepoInfo) updates the chip in place; another root is ignored', async () => {
+  const t = await mounted(repoData(), { repo: LINKED });
+  const chip = t.btn('worktreeChip');
+  const before = t.store.state.repo;
+  t.store.actions.updateRepoInfo({ ...LINKED, linkedWorktree: { ...LINKED.linkedWorktree } });
+  assert.equal(t.store.state.repo, before, 'nothing changed: the same repo object, no re-render');
+  const moved = { mainPath: '/w/moved/monorepo', mainName: 'monorepo', title: 'monorepo · monorepo-feat' };
+  t.store.actions.updateRepoInfo({ ...LINKED, linkedWorktree: moved });
+  assert.equal(chip.title, '/w/monorepo-feat\nLinked worktree of /w/moved/monorepo');
+  assert.equal(t.store.state.repo.root, LINKED.root);
+  t.store.actions.updateRepoInfo({ root: '/elsewhere', name: 'x', bare: false, linkedWorktree: null });
+  assert.equal(chip.hidden, false, 'another root: ignored');
+  t.store.actions.updateRepoInfo({ ...LINKED, linkedWorktree: null });
+  assert.equal(chip.hidden, true, 'no longer a linked worktree');
+  t.dispose();
+});

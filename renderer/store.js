@@ -26,7 +26,9 @@
 //                the last value is kept when reading
 //                fails. The current worktree is absent: use store.isDirty().
 //   worktreeReveal a counter: actions.revealWorktree() bumps it (the toolbar's linked-worktree chip), and
-//                the sidebar then opens its Worktrees section and focuses the current worktree's row
+//                the sidebar then opens its Worktrees section and focuses the current worktree's row. A
+//                click event kept as state on purpose: the store has no event bus, only keyed subscriptions,
+//                so a changing counter is how one component asks another to act
 //   status       git.status() result | null
 //   refs         git.refs() result | null
 //   refsBySha    Map sha -> [{type:'head'|'local'|'remote'|'tag', name, current?, upstream?, remote?, branch?}]
@@ -850,6 +852,18 @@
         setPullMode: (mode) => set({ pullMode: mode == null ? null : mode }),
         setContinueDraft: (draft) => set({ continueDraft: draft || null }),
         revealWorktree: () => set({ worktreeReveal: state.worktreeReveal + 1 }),
+        /**
+         * Main's fresh summary of the open repo (app.js, from app:getState): only what main may have
+         * re-decided for the same root, linkedWorktree (the toolbar's chip and tooltip). Another root,
+         * or nothing changed: no-op (no 'repo' notification, so nothing re-renders).
+         */
+        updateRepoInfo: (repo) => {
+          const cur = state.repo;
+          if (!repo || !cur || repo.root !== cur.root) return;
+          const lw = repo.linkedWorktree || null;
+          if (JSON.stringify(lw) === JSON.stringify(cur.linkedWorktree || null)) return;
+          set({ repo: { ...cur, linkedWorktree: lw } });
+        },
       },
     };
   }

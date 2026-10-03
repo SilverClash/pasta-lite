@@ -493,6 +493,44 @@ test('checkoutRefusal: never the current or bare entry, never a commit; the path
   assert.deepEqual(A.checkoutItem({ target: 'x', kind: 'local' }), { label: 'Checkout', flow: 'checkout', args: [{ target: 'x', kind: 'local' }] }, 'without state: unchecked');
 });
 
+test('checkoutRefusal of a remote branch: its local branch from state.refs; never guessed from the name (a remote name may contain "/")', () => {
+  const { A } = loadSidebar();
+  const remote = [{ name: 'team/fork/x', remote: 'team/fork', branch: 'x' }];
+  const s = { refs: { remote }, worktrees: [WT.main, wt({ path: '/w/x', branch: 'x' }), wt({ path: '/w/fx', branch: 'fork/x' })] };
+  assert.deepEqual(A.checkoutRefusal('team/fork/x', s, { kind: 'remote' }), { title: 'Checked out in worktree /w/x' });
+  assert.equal(A.checkoutRefusal('team/fork/x', { ...s, refs: { remote: [] } }, { kind: 'remote' }), null, 'unlisted: git decides (not "fork/x")');
+  assert.equal(A.checkoutRefusal('team/fork/x', { ...s, refs: null }, { kind: 'remote' }), null);
+});
+
+test('deleteRefusal: worktreeHolding skips the current worktree (its branch is refused as the checked-out one), not another one', () => {
+  const { A } = loadSidebar();
+  // No refs: only the worktree lookup can refuse.
+  const s = { worktrees: [WT.main, WT.feat] };
+  assert.equal(A.deleteRefusal('main', s), null, 'the current worktree\'s entry is skipped');
+  assert.equal(A.deleteRefusal('main', { ...s, refs: REFS() }).why, 'checked out', 'the current branch is refused as such');
+  assert.equal(A.deleteRefusal('feat/x', s).why, 'checked out in the worktree /w/feat-x');
+  const asOther = { ...s, worktrees: [{ ...WT.main, current: false }, WT.feat] };
+  assert.equal(A.deleteRefusal('main', asOther).why, 'checked out in the worktree /r', 'the same entry, not current: refused');
+});
+
+test('a prunable worktree (its folder deleted) still holds its branch: checkout is refused, and git refuses it too', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const h = require('./helpers');
+  const git = require('../src/git');
+  const { A } = loadSidebar();
+  const dir = h.initRepo();
+  const gone = path.join(h.tmpDir(), 'held');
+  h.git(dir, 'worktree', 'add', '-q', '-b', 'held', gone);
+  fs.rmSync(gone, { recursive: true, force: true });
+  const worktrees = await git.worktrees(dir);
+  assert.equal(worktrees.find((w) => w.branch === 'held').prunable, true);
+  const s = { worktrees };
+  assert.deepEqual(A.checkoutRefusal('held', s), { title: `Checked out in worktree ${gone}` });
+  assert.equal(A.checkoutItem({ target: 'held', kind: 'local', state: s }).disabled, true);
+  assert.throws(() => h.git(dir, 'checkout', 'held'), /already used by worktree|already checked out/);
+});
+
 test('mounted sidebar: double-clicking a branch checked out in another worktree runs nothing; its menu\'s Checkout is disabled', async (tc) => {
   const t = await mountSidebar(tc);
   await t.answerWorktrees();
@@ -516,7 +554,7 @@ test('mounted sidebar: revealWorktree opens a collapsed section, clears a filter
   assert.equal(t.wrow('/w/detached'), undefined, 'collapsed (and filtered out)');
   t.store.actions.revealWorktree();
   assert.equal(t.section().classList.contains('collapsed'), false, 'the section is open');
-  assert.equal(JSON.parse(globalThis.localStorage.getItem('pl.sidebar.sections')).worktrees, undefined, 'and stays open');
+  assert.equal(JSON.parse(globalThis.localStorage.getItem('pl.sidebar.sections')).worktrees, true, 'the saved preference stays collapsed');
   assert.equal(input.value, '', 'the filter that hid the row is cleared');
   const row = t.wrow('/w/detached');
   assert.equal(t.dom.doc.activeElement, row, 'the current worktree\'s row has the focus');
@@ -532,6 +570,12 @@ test('mounted sidebar: revealWorktree opens a collapsed section, clears a filter
   assert.equal(t.wrow('/w/detached').classList.contains('sb-flash'), false, 'briefly');
   t.store.set({ worktreeDirty: {} });
   assert.equal(t.wrow('/w/detached').classList.contains('sb-flash'), false, 'and not again on the next render');
+  // The user closing and opening the section again saves their choice.
+  const header = () => t.section().querySelector('.sb-section-header');
+  t.dom.dispatch(header(), 'click');
+  t.dom.dispatch(header(), 'click');
+  assert.equal(t.section().classList.contains('collapsed'), false);
+  assert.equal(JSON.parse(globalThis.localStorage.getItem('pl.sidebar.sections')).worktrees, undefined, 'opened by the user: saved open');
 });
 
 test('mounted sidebar: revealWorktree keeps a filter that shows the row; before the first worktrees read it focuses the section header', async (tc) => {

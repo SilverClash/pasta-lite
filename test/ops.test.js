@@ -422,6 +422,63 @@ test('openRepo / summary: linkedWorktree is set only for a linked worktree, from
   assert.equal((await ops.openRepo(top)).linkedWorktree, null, 'the bare repo itself');
 });
 
+test('linkedWorktree: a submodule is not linked; a linked worktree of a submodule names the submodule\'s folder (core.worktree), not .git/modules', async () => {
+  const lib = h.initRepo();
+  const sup = h.initRepo();
+  h.git(sup, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', lib, 'sub');
+  const sub = path.join(sup, 'sub');
+  assert.equal(fs.lstatSync(path.join(sub, '.git')).isFile(), true, 'a submodule has a .git file, as a linked worktree does');
+  assert.equal((await ops.openRepo(sub)).linkedWorktree, null, 'its git dir is its common dir');
+  const wt = path.join(h.tmpDir(), 'sub-feat');
+  h.git(sub, 'worktree', 'add', '-q', '-b', 'feat', wt);
+  // git's own list says .git/modules/sub: the reason core.worktree is read.
+  assert.match(h.git(wt, 'worktree', 'list', '--porcelain').split('\n')[0], /\.git[\\/]modules[\\/]sub$/);
+  assert.deepEqual((await ops.openRepo(wt)).linkedWorktree, { mainPath: sub, mainName: 'sub', title: `sub · ${path.basename(wt)}` });
+});
+
+test('linkedWorktree: a worktree added from a linked worktree, and one opened through a symlink, belong to the main worktree', async () => {
+  const dir = h.initRepo();
+  const wt = path.join(h.tmpDir(), 'one');
+  h.git(dir, 'worktree', 'add', '-q', '-b', 'one', wt);
+  const wt2 = path.join(h.tmpDir(), 'two');
+  h.git(wt, 'worktree', 'add', '-q', '-b', 'two', wt2);
+  const want = (w) => ({ mainPath: dir, mainName: path.basename(dir), title: `${path.basename(dir)} · ${path.basename(w)}` });
+  assert.deepEqual((await ops.openRepo(wt2)).linkedWorktree, want(wt2), 'a worktree of a worktree');
+  const link = path.join(h.tmpDir(), 'link');
+  fs.symlinkSync(wt, link);
+  const info = await ops.openRepo(link);
+  assert.equal(info.root, wt, 'git resolves the symlink to the real root');
+  assert.deepEqual(info.linkedWorktree, want(wt));
+});
+
+test('linkedWorktree: a failed `worktree list` (an error, a timeout or a cancellation) never fails the open: git\'s guess, the common dir', async (t) => {
+  const x = require('../src/exec');
+  const { linkedWorktreeOf } = require('../src/repo-open');
+  // The bare + worktrees layout is the one case that needs the list (no .git folder, no core.worktree).
+  const { top, bare, wt } = h.bareWithWorktree();
+  const want = { mainPath: bare, mainName: path.basename(top), title: `${path.basename(top)} · ${path.basename(wt)}` };
+  const realGit = require('node:child_process').execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  const marker = path.join(h.tmpDir(), 'listing');
+  const fake = (onList) => {
+    const bin = path.join(h.tmpDir(), 'git');
+    fs.writeFileSync(bin, `#!/bin/sh\ncase " $* " in *" worktree list "*) ${onList} ;; esac\nexec '${realGit}' "$@"\n`, { mode: 0o755 });
+    x.setGitBinary(bin);
+  };
+  t.after(() => x.setGitBinary(null));
+  fake(`touch '${marker}'; echo boom >&2; exit 1`);
+  const info = await ops.openRepo(wt);
+  assert.deepEqual([info.root, info.head.branch, info.linkedWorktree], [wt, 'main', want], 'git failing');
+  assert.equal(fs.existsSync(marker), true, 'the list was asked');
+  fs.rmSync(marker);
+  // A hung list (a worktree on a dead network volume): cancelled, a GitError with a kind, as a timeout is.
+  fake(`touch '${marker}'; exec sleep 30`);
+  const ac = new AbortController();
+  const lookup = x.withSignal(ac.signal, () => linkedWorktreeOf(wt));
+  await waitForFile(marker, 'worktree list');
+  ac.abort();
+  assert.deepEqual(await lookup, want, 'cancelled');
+});
+
 test('openRepo passes other git failures through: dubious ownership -> unsafe-repo with git message', async (t) => {
   const git = require('../src/git');
   const dir = h.tmpDir();
